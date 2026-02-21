@@ -40,6 +40,7 @@ export function createCoreRouter(deps: ProjectRouterDependencies): Router {
     projectService,
     agentManager,
     projectDiscoveryService,
+    settingsRepository,
   } = deps;
 
   // Create a middleware instance that uses the discovery service if available
@@ -395,6 +396,63 @@ export function createCoreRouter(deps: ProjectRouterDependencies): Router {
       success: true,
       filePath,
       size: Buffer.byteLength(content!, 'utf-8'),
+    });
+  }));
+
+  // Get project Docker override with effective state
+  router.get('/:id/docker', validateParams(projectIdSchema), projectExistsMiddleware, asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const project = req.project!;
+    const settings = await settingsRepository.get();
+    const globalEnabled = settings.docker?.enabled ?? false;
+
+    let effectiveDocker = false;
+
+    if (globalEnabled) {
+      if (project.dockerOverride === false) {
+        effectiveDocker = false;
+      } else {
+        effectiveDocker = true;
+      }
+    }
+
+    const effectiveImage = effectiveDocker
+      ? (project.dockerImage || settings.docker?.baseImage || null)
+      : null;
+
+    res.json({
+      dockerOverride: project.dockerOverride,
+      dockerImage: project.dockerImage ?? null,
+      effectiveDocker,
+      imageName: effectiveImage,
+    });
+  }));
+
+  // Set project Docker override and/or image
+  router.put('/:id/docker', validateParams(projectIdSchema), projectExistsMiddleware, asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const id = req.params['id'] as string;
+    const body = req.body as { dockerOverride?: boolean; dockerImage?: string | null };
+    const { dockerOverride, dockerImage } = body;
+
+    if (dockerOverride !== undefined && typeof dockerOverride !== 'boolean') {
+      throw new ValidationError('dockerOverride must be a boolean');
+    }
+
+    if (dockerImage !== undefined && dockerImage !== null && typeof dockerImage !== 'string') {
+      throw new ValidationError('dockerImage must be a string or null');
+    }
+
+    if (dockerOverride !== undefined) {
+      await projectRepository.updateDockerOverride(id, dockerOverride);
+    }
+
+    if (dockerImage !== undefined) {
+      await projectRepository.updateDockerImage(id, dockerImage);
+    }
+
+    res.json({
+      dockerOverride,
+      dockerImage,
+      updated: true,
     });
   }));
 

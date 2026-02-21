@@ -47,6 +47,7 @@ conversations/
 - **Infrastructure**: `ConfigLoader`, `HttpServer`, `ProjectWebSocketServer`, `EventManager` (in-memory event bus), `Logger` (with circular buffer)
 - **Data**: `ProjectRepository` (status.json per project), `ConversationRepository` (per project/item), `SettingsRepository` (global settings + agentPromptTemplate)
 - **Services**: `ProjectService`, `FilesystemService`, `GitService` (simple-git), `GitHubCLIService` (gh CLI wrapper), `RoadmapParser`, `RoadmapGenerator`, `InstructionGenerator`, `ClaudeOptimizationService` (edits files directly via Edit tool), `DataWipeService` (factory reset — wipes all Claudito data), `RunConfigurationService` (CRUD for run configs), `RunConfigImportService` (detects project files and suggests configs), `RunProcessManager` (node-pty process lifecycle with auto-restart), `InventifyService` (project idea generator using one-off agent + Ralph Loop)
+- **Docker**: `DockerService` (CLI wrapper), `DockerCommandRunner` (testable command execution), `DockerProcessSpawner` (implements `ProcessSpawner` for Docker exec), `ContainerManager` (per-project container lifecycle, returns `EnsureContainerResult` with restart detection), `ImageManager` (image CRUD + variants)
 - **Agents**: `ClaudeAgent` (CLI process management), `AgentManager` (multi-agent lifecycle: interactive + one-off)
 
 ## API Endpoints
@@ -76,6 +77,10 @@ All project routes prefixed with `/api/projects/:id`. Standard REST verbs (GET/P
 **Ralph Loop** (`/:id/ralph-loop`): GET (list), `POST start`, `/:taskId` GET|DELETE, `/:taskId/stop|pause|resume`
 
 **Run Configurations** (`/:id/run-configs`): GET / (list), GET `/importable` (scan project files), POST / (create), PUT `/:configId` (update), DELETE `/:configId`, POST `/:configId/start`, POST `/:configId/stop`, GET `/:configId/status`
+
+**Docker** (`/api/docker`): `GET /availability`, `GET /containers` (list all), `GET /containers/:projectId`, `POST /containers/:projectId/restart`, `GET /images` (list), `POST /images/build` (body: variantName, imageName?), `DELETE /images/:name`, `GET /variants`
+
+**Per-Project Docker** (`/:id`): GET/PUT `docker` (dockerOverride toggle + dockerImage selector)
 
 **Inventify** (`/api/projects/inventify`): `POST /start` (body: projectTypes[], themes[], languages?[], technologies?[], customPrompt?) — brainstorms 5 project ideas, `GET /ideas` — returns pending ideas, `POST /suggest-names` (body: selectedIndex) — suggests 5 project names for selected idea, `GET /name-suggestions` — returns pending name suggestions, `POST /select` (body: selectedIndex, projectName) — picks an idea + name and builds it (creates directory + plan, registers project, starts Ralph Loop), `GET /build-result` — returns `{newProjectId, projectName}` after build completes (polled by frontend)
 
@@ -140,7 +145,7 @@ Sessions use UUID v4 IDs: `--session-id {uuid}` (new) or `--resume {uuid}` (exis
 
 ## Settings
 
-`maxConcurrentAgents` (1-10), `agentPromptTemplate`, `appendSystemPrompt` (restarts all agents on change), `sendWithCtrlEnter`, `historyLimit` (5-100, default: 25), `promptTemplates`, `defaultModel` (default: claude-opus-4-6), `chromeEnabled` (toggle in toolbar, passes `--chrome`/`--no-chrome` to agents), `inventifyFolder` (parent directory for generated projects)
+`maxConcurrentAgents` (1-10), `agentPromptTemplate`, `appendSystemPrompt` (restarts all agents on change), `sendWithCtrlEnter`, `historyLimit` (5-100, default: 25), `promptTemplates`, `defaultModel` (default: claude-sonnet-4-6), `chromeEnabled` (toggle in toolbar, passes `--chrome`/`--no-chrome` to agents), `inventifyFolder` (parent directory for generated projects)
 
 **Prompt Templates**: Reusable prompts (Settings > Templates). Syntax: `${type:name}` or `${type:name:options}`. Types: `text`, `textarea`, `select:opt1,opt2`, `checkbox`
 

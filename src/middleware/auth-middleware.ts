@@ -44,6 +44,12 @@ export function createAuthMiddleware(deps: AuthMiddlewareDependencies) {
   const { authService } = deps;
 
   return (req: Request, res: Response, next: NextFunction): void => {
+    // Health check is public (auth is optional via ?auth=1 query param)
+    if (req.path === '/health') {
+      next();
+      return;
+    }
+
     const sessionId = parseCookie(req.headers.cookie, COOKIE_NAME);
 
     if (!sessionId || !authService.validateSession(sessionId)) {

@@ -88,6 +88,12 @@ export const DEFAULT_TEST_SETTINGS: GlobalSettings = {
   },
   chromeEnabled: false,
   inventifyFolder: '',
+  docker: {
+    enabled: false,
+    baseImage: 'claudito-agent:latest',
+    resourceLimits: { cpus: 2.0, memoryMb: 4096 },
+    networkMode: 'bridge',
+  },
 };
 
 export const DEFAULT_CLAUDE_PERMISSIONS: ClaudePermissions = {
@@ -359,6 +365,22 @@ export function createMockProjectRepository(
 
       if (!project) return Promise.resolve(null);
       project.runConfigurations = configs;
+      project.updatedAt = new Date().toISOString();
+      return Promise.resolve({ ...project });
+    }),
+    updateDockerOverride: jest.fn().mockImplementation((id: string, dockerOverride: boolean | undefined) => {
+      const project = projects.get(id);
+
+      if (!project) return Promise.resolve(null);
+      project.dockerOverride = dockerOverride;
+      project.updatedAt = new Date().toISOString();
+      return Promise.resolve({ ...project });
+    }),
+    updateDockerImage: jest.fn().mockImplementation((id: string, dockerImage: string | null) => {
+      const project = projects.get(id);
+
+      if (!project) return Promise.resolve(null);
+      project.dockerImage = dockerImage;
       project.updatedAt = new Date().toISOString();
       return Promise.resolve({ ...project });
     }),
@@ -931,6 +953,7 @@ import {
   AgentLoopState,
   QueuedProject,
   FullAgentStatus,
+  StartAgentResult,
 } from '../../../src/agents/agent-manager';
 
 export function createMockAgentManager(): jest.Mocked<AgentManager> {
@@ -946,7 +969,7 @@ export function createMockAgentManager(): jest.Mocked<AgentManager> {
     }),
     startInteractiveAgent: jest.fn().mockImplementation((projectId: string) => {
       runningAgents.set(projectId, { mode: 'interactive', status: 'running' });
-      return Promise.resolve();
+      return Promise.resolve({ containerRestarted: false, containerImageName: undefined, dockerFallback: false } as StartAgentResult);
     }),
     sendInput: jest.fn(),
     sendToolResult: jest.fn(),
@@ -1752,6 +1775,102 @@ export function createTestRunConfiguration(overrides?: Partial<RunConfig>): RunC
 
 import { InventifyService, InventifyResult } from '../../../src/services/inventify-types';
 
+// ============================================================================
+// Docker Service Mocks
+// ============================================================================
+
+import {
+  DockerService,
+  DockerCommandRunner,
+  DockerAvailability,
+  ContainerInfo,
+  ContainerManager,
+  EnsureContainerResult,
+  ImageManager,
+} from '../../../src/services/docker/types';
+
+export const sampleDockerAvailability: DockerAvailability = {
+  installed: true,
+  version: '24.0.7',
+  running: true,
+  error: null,
+};
+
+export const sampleContainerInfo: ContainerInfo = {
+  containerId: 'abc123def456',
+  projectId: '123e4567-e89b-12d3-a456-426614174000',
+  status: 'running',
+  imageName: 'claudito-agent:latest',
+  createdAt: '2024-01-01T00:00:00.000Z',
+  resourceUsage: null,
+};
+
+export function createMockDockerCommandRunner(): jest.Mocked<DockerCommandRunner> {
+  return {
+    exec: jest.fn().mockResolvedValue({ stdout: '', stderr: '' }),
+    spawn: jest.fn().mockReturnValue(new EventEmitter() as any),
+  };
+}
+
+export function createMockDockerService(): jest.Mocked<DockerService> {
+  return {
+    checkAvailability: jest.fn().mockResolvedValue({ ...sampleDockerAvailability }),
+    buildImage: jest.fn().mockResolvedValue(undefined),
+    createContainer: jest.fn().mockResolvedValue('abc123def456'),
+    startContainer: jest.fn().mockResolvedValue(undefined),
+    stopContainer: jest.fn().mockResolvedValue(undefined),
+    removeContainer: jest.fn().mockResolvedValue(undefined),
+    getContainerStatus: jest.fn().mockResolvedValue({ ...sampleContainerInfo }),
+    getResourceUsage: jest.fn().mockResolvedValue(null),
+    isContainerRunning: jest.fn().mockResolvedValue(true),
+    listContainers: jest.fn().mockResolvedValue([{ ...sampleContainerInfo }]),
+    copyToContainer: jest.fn().mockResolvedValue(undefined),
+    execInContainer: jest.fn().mockResolvedValue({ stdout: '', stderr: '' }),
+  };
+}
+
+import { FileSystemChecker } from '../../../src/services/docker/container-manager';
+
+export function createMockFileSystemChecker(exists = true): jest.Mocked<FileSystemChecker> {
+  return {
+    directoryExists: jest.fn().mockReturnValue(exists),
+    fileExists: jest.fn().mockReturnValue(exists),
+    listEntries: jest.fn().mockReturnValue(['.credentials.json', 'projects', 'settings.json']),
+  };
+}
+
+export function createMockContainerManager(): jest.Mocked<ContainerManager> {
+  const defaultResult: EnsureContainerResult = {
+    containerId: 'abc123def456',
+    imageName: 'claudito-agent:latest',
+    wasCreated: false,
+    wasRestarted: false,
+  };
+
+  return {
+    ensureContainer: jest.fn().mockResolvedValue(defaultResult),
+    stopProjectContainer: jest.fn().mockResolvedValue(undefined),
+    stopAllContainers: jest.fn().mockResolvedValue(undefined),
+    getContainerForProject: jest.fn().mockReturnValue(null),
+    getProjectContainers: jest.fn().mockResolvedValue([]),
+    isHealthy: jest.fn().mockResolvedValue(true),
+  };
+}
+
+export function createMockImageManager(): jest.Mocked<ImageManager> {
+  return {
+    listImages: jest.fn().mockResolvedValue([]),
+    buildImage: jest.fn().mockResolvedValue(undefined),
+    buildImageStreaming: jest.fn().mockResolvedValue(undefined),
+    removeImage: jest.fn().mockResolvedValue(undefined),
+    getAvailableVariants: jest.fn().mockReturnValue([]),
+  };
+}
+
+// ============================================================================
+// Inventify Service Mock
+// ============================================================================
+
 export function createMockInventifyService(): jest.Mocked<InventifyService> {
   return {
     start: jest.fn().mockResolvedValue({
@@ -1773,5 +1892,32 @@ export function createMockInventifyService(): jest.Mocked<InventifyService> {
     completeBuild: jest.fn().mockResolvedValue(undefined),
     getBuildResult: jest.fn().mockReturnValue(null),
     cancel: jest.fn().mockResolvedValue(undefined),
+  };
+}
+
+// ============================================================================
+// Claude CLI Service Mock
+// ============================================================================
+
+import { ClaudeCliService, ClaudeCliInfo } from '../../../src/services/claude-cli-service';
+
+export const sampleClaudeCliInfo: ClaudeCliInfo = {
+  installed: true,
+  version: '1.0.18',
+  auth: {
+    loggedIn: true,
+    authMethod: 'claude.ai',
+    apiProvider: 'firstParty',
+    email: 'test@example.com',
+    orgId: 'org-123',
+    orgName: null,
+    subscriptionType: 'max',
+  },
+  error: null,
+};
+
+export function createMockClaudeCliService(): jest.Mocked<ClaudeCliService> {
+  return {
+    getInfo: jest.fn().mockResolvedValue({ ...sampleClaudeCliInfo }),
   };
 }

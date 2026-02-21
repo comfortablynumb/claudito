@@ -195,7 +195,7 @@ describe('FileSettingsRepository', () => {
       expect(result.ralphLoop.defaultMaxTurns).toBe(10);
       expect(result.ralphLoop.defaultWorkerModel).toBe('claude-opus-4-6');
       // Unchanged nested property should remain
-      expect(result.ralphLoop.defaultReviewerModel).toBe('claude-sonnet-4-5-20250929');
+      expect(result.ralphLoop.defaultReviewerModel).toBe('claude-sonnet-4-6');
     });
 
     it('should update promptTemplates', async () => {
@@ -308,7 +308,7 @@ describe('FileSettingsRepository', () => {
 
         expect(settings.ralphLoop.defaultMaxTurns).toBe(5);
         expect(settings.ralphLoop.defaultWorkerModel).toBe('claude-opus-4-6');
-        expect(settings.ralphLoop.defaultReviewerModel).toBe('claude-sonnet-4-5-20250929');
+        expect(settings.ralphLoop.defaultReviewerModel).toBe('claude-sonnet-4-6');
 
         expect(settings.promptTemplates).toEqual(DEFAULT_PROMPT_TEMPLATES);
       });

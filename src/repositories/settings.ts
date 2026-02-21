@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { DockerSettings } from '../services/docker/types';
 
 export interface PermissionRule {
   tool: string;
@@ -190,9 +191,7 @@ Base your analysis on the project files, configuration, and code structure.`,
 
 **Scope:** \${select:scope:Entire codebase,Specific directory,Single file,Changed files only=Entire codebase}
 
-\${select:scope=Specific directory:Directory Path:\${text:directory=/src}}
-
-\${select:scope=Single file:File Path:\${text:file=}}
+**Directory/File Path (if applicable):** \${text:path=}
 
 **Priority Focus:** \${select:priority:All areas,Performance,Security,Maintainability,Testing,Architecture=All areas}
 
@@ -211,7 +210,7 @@ Provide a detailed plan with prioritized recommendations for improving code qual
 
 **Task:** \${select:task_type:Implement current plan,Custom task=Implement current plan}
 
-\${select:task_type=Custom task:Task Description:\${textarea:custom_task=}}
+**Custom Task Description (if applicable):** \${textarea:custom_task=}
 
 **Approach:** \${select:approach:Best practices focus,Performance optimized,Security hardened,Maintainability first=Best practices focus}
 
@@ -270,6 +269,8 @@ export interface GlobalSettings {
   chromeEnabled: boolean;
   /** Base directory for Inventify-generated projects */
   inventifyFolder: string;
+  /** Docker sandboxed execution settings */
+  docker: DockerSettings;
 }
 
 const DEFAULT_SETTINGS: GlobalSettings = {
@@ -324,7 +325,7 @@ const DEFAULT_SETTINGS: GlobalSettings = {
   ralphLoop: {
     defaultMaxTurns: 5,
     defaultWorkerModel: 'claude-opus-4-6',
-    defaultReviewerModel: 'claude-sonnet-4-5-20250929',
+    defaultReviewerModel: 'claude-sonnet-4-6',
     defaultWorkerSystemPrompt: `# Worker Agent Instructions
 
 You are a software development worker agent. Your role is to implement the requested changes or features with precision and thoroughness.
@@ -371,6 +372,12 @@ Your goal is to ensure high-quality deliverables. Be thorough but fair in your a
   },
   chromeEnabled: false,
   inventifyFolder: '',
+  docker: {
+    enabled: false,
+    baseImage: 'claudito-agent:latest',
+    resourceLimits: { cpus: 2.0, memoryMb: 4096 },
+    networkMode: 'bridge',
+  },
 };
 
 // Update type that allows partial nested objects for incremental updates
@@ -390,6 +397,7 @@ export interface SettingsUpdate {
   mcp?: Partial<McpSettings>;
   chromeEnabled?: boolean;
   inventifyFolder?: string;
+  docker?: Partial<DockerSettings>;
 }
 
 export interface SettingsRepository {
@@ -444,7 +452,7 @@ export class FileSettingsRepository implements SettingsRepository {
   }
 
   private migrateOldModelId(modelId: string | undefined): string | undefined {
-    const OLD_MODEL_IDS = ['claude-sonnet-4-20250514', 'claude-opus-4-20250514'];
+    const OLD_MODEL_IDS = ['claude-sonnet-4-20250514', 'claude-opus-4-20250514', 'claude-sonnet-4-5-20250929'];
 
     if (modelId && OLD_MODEL_IDS.includes(modelId)) {
       return undefined;
@@ -458,16 +466,26 @@ export class FileSettingsRepository implements SettingsRepository {
       return [...DEFAULT_PROMPT_TEMPLATES];
     }
 
-    // Get IDs of existing templates
-    const existingIds = existingTemplates.map(t => t.id);
+    const defaultsById = new Map(DEFAULT_PROMPT_TEMPLATES.map(t => [t.id, t]));
 
-    // Find default templates that are missing
-    const missingDefaults = DEFAULT_PROMPT_TEMPLATES.filter(
-      defaultTemplate => !existingIds.includes(defaultTemplate.id)
-    );
+    // Update existing default templates to latest content, keep user templates as-is
+    const merged = existingTemplates.map(t => {
+      const defaultVersion = defaultsById.get(t.id);
 
-    // Merge existing with missing defaults
-    return [...existingTemplates, ...missingDefaults];
+      if (defaultVersion) {
+        defaultsById.delete(t.id);
+        return { ...defaultVersion };
+      }
+
+      return t;
+    });
+
+    // Add any missing defaults
+    for (const missing of defaultsById.values()) {
+      merged.push({ ...missing });
+    }
+
+    return merged;
   }
 
   private mergeWithDefaults(parsed: Partial<GlobalSettings>): GlobalSettings {
@@ -476,6 +494,7 @@ export class FileSettingsRepository implements SettingsRepository {
     const parsedStreaming = parsed.agentStreaming;
     const parsedRalphLoop = parsed.ralphLoop;
     const parsedMcp = parsed.mcp;
+    const parsedDocker = parsed.docker;
 
     return {
       maxConcurrentAgents: parsed.maxConcurrentAgents ?? DEFAULT_SETTINGS.maxConcurrentAgents,
@@ -516,6 +535,15 @@ export class FileSettingsRepository implements SettingsRepository {
       },
       chromeEnabled: parsed.chromeEnabled ?? DEFAULT_SETTINGS.chromeEnabled,
       inventifyFolder: parsed.inventifyFolder ?? DEFAULT_SETTINGS.inventifyFolder,
+      docker: {
+        enabled: parsedDocker?.enabled ?? DEFAULT_SETTINGS.docker.enabled,
+        baseImage: parsedDocker?.baseImage ?? DEFAULT_SETTINGS.docker.baseImage,
+        resourceLimits: {
+          cpus: parsedDocker?.resourceLimits?.cpus ?? DEFAULT_SETTINGS.docker.resourceLimits.cpus,
+          memoryMb: parsedDocker?.resourceLimits?.memoryMb ?? DEFAULT_SETTINGS.docker.resourceLimits.memoryMb,
+        },
+        networkMode: parsedDocker?.networkMode ?? DEFAULT_SETTINGS.docker.networkMode,
+      },
     };
   }
 
@@ -619,6 +647,21 @@ export class FileSettingsRepository implements SettingsRepository {
 
     if (updates.inventifyFolder !== undefined) {
       this.settings.inventifyFolder = updates.inventifyFolder;
+    }
+
+    if (updates.docker) {
+      this.settings.docker = {
+        ...this.settings.docker,
+        ...updates.docker,
+        resourceLimits: {
+          ...this.settings.docker.resourceLimits,
+          ...(updates.docker.resourceLimits || {}),
+        },
+      };
+
+      // Clamp resource limits to reasonable values
+      this.settings.docker.resourceLimits.cpus = Math.max(0.5, Math.min(16, this.settings.docker.resourceLimits.cpus));
+      this.settings.docker.resourceLimits.memoryMb = Math.max(512, Math.min(32768, this.settings.docker.resourceLimits.memoryMb));
     }
 
     this.saveToFile();

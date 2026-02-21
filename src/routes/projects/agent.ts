@@ -141,7 +141,7 @@ export function createAgentRouter(deps: ProjectRouterDependencies): Router {
     }
 
     // Don't validate sessionId - let the agent manager handle session creation/resumption
-    await agentManager.startInteractiveAgent(id, {
+    const result = await agentManager.startInteractiveAgent(id, {
       initialMessage: message,
       images,
       sessionId,
@@ -151,7 +151,16 @@ export function createAgentRouter(deps: ProjectRouterDependencies): Router {
     const status = agentManager.isQueued(id) ? 'queued' : 'running';
     const actualSessionId = agentManager.getSessionId(id);
 
-    res.json({ success: true, status, mode: 'interactive', sessionId: actualSessionId });
+    res.json({
+      success: true,
+      status,
+      mode: 'interactive',
+      sessionId: actualSessionId,
+      containerRestarted: result.containerRestarted,
+      containerImageName: result.containerImageName,
+      dockerFallback: result.dockerFallback,
+      dockerFallbackReason: result.dockerFallbackReason,
+    });
   }));
 
   // Stop a one-off agent

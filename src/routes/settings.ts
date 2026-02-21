@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { SettingsRepository, ClaudePermissions, PromptTemplate, McpServerConfig } from '../repositories';
 import { DataWipeService } from '../services/data-wipe-service';
+import { DockerSettings } from '../services/docker/types';
 import { asyncHandler, ValidationError } from '../utils';
 import { SUPPORTED_MODELS, MODEL_DISPLAY_NAMES } from '../config/models';
 
@@ -19,6 +20,7 @@ interface UpdateSettingsBody {
   };
   chromeEnabled?: boolean;
   inventifyFolder?: string;
+  docker?: Partial<DockerSettings>;
 }
 
 export interface SettingsChangeEvent {
@@ -93,7 +95,7 @@ export function createSettingsRouter(deps: SettingsRouterDependencies): Router {
 
   router.put('/', asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const body = req.body as UpdateSettingsBody;
-    const { maxConcurrentAgents, claudePermissions, agentPromptTemplate, sendWithCtrlEnter, historyLimit, enableDesktopNotifications, appendSystemPrompt, promptTemplates, mcp, chromeEnabled, inventifyFolder } = body;
+    const { maxConcurrentAgents, claudePermissions, agentPromptTemplate, sendWithCtrlEnter, historyLimit, enableDesktopNotifications, appendSystemPrompt, promptTemplates, mcp, chromeEnabled, inventifyFolder, docker } = body;
 
     if (maxConcurrentAgents !== undefined && (typeof maxConcurrentAgents !== 'number' || maxConcurrentAgents < 1)) {
       throw new ValidationError('maxConcurrentAgents must be a positive number');
@@ -111,6 +113,10 @@ export function createSettingsRouter(deps: SettingsRouterDependencies): Router {
 
     if (mcp?.servers) {
       validateMcpServers(mcp.servers);
+    }
+
+    if (docker) {
+      validateDockerSettings(docker);
     }
 
     // Get current settings to detect changes
@@ -133,6 +139,7 @@ export function createSettingsRouter(deps: SettingsRouterDependencies): Router {
       mcp,
       chromeEnabled,
       inventifyFolder,
+      docker,
     });
 
     // Notify about settings changes
@@ -223,6 +230,42 @@ function validatePromptTemplates(templates: unknown): void {
 
     if (t.description !== undefined && typeof t.description !== 'string') {
       throw new ValidationError('Template description must be a string');
+    }
+  }
+}
+
+const VALID_NETWORK_MODES = ['bridge', 'none'];
+
+function validateDockerSettings(docker: Partial<DockerSettings>): void {
+  if (docker.enabled !== undefined && typeof docker.enabled !== 'boolean') {
+    throw new ValidationError('Docker enabled must be a boolean');
+  }
+
+  if (docker.baseImage !== undefined) {
+    if (typeof docker.baseImage !== 'string' || docker.baseImage.trim() === '') {
+      throw new ValidationError('Docker base image must be a non-empty string');
+    }
+  }
+
+  if (docker.networkMode !== undefined && !VALID_NETWORK_MODES.includes(docker.networkMode)) {
+    throw new ValidationError('Docker network mode must be "bridge" or "none"');
+  }
+
+  if (docker.resourceLimits) {
+    validateDockerResourceLimits(docker.resourceLimits);
+  }
+}
+
+function validateDockerResourceLimits(limits: Partial<DockerSettings['resourceLimits']>): void {
+  if (limits.cpus !== undefined) {
+    if (typeof limits.cpus !== 'number' || limits.cpus <= 0) {
+      throw new ValidationError('Docker CPU limit must be a positive number');
+    }
+  }
+
+  if (limits.memoryMb !== undefined) {
+    if (typeof limits.memoryMb !== 'number' || limits.memoryMb <= 0) {
+      throw new ValidationError('Docker memory limit must be a positive number');
     }
   }
 }

@@ -10,7 +10,6 @@ import { createErrorHandler, formatAccessibleUrls } from '../utils';
 import { AuthService, createAuthService } from '../services/auth-service';
 import { createAuthMiddleware, parseCookie, COOKIE_NAME } from '../middleware/auth-middleware';
 import { displayLoginCredentials } from '../utils/qr-generator';
-import packageJson from '../../package.json';
 
 export interface HttpServer {
   start(): Promise<void>;
@@ -46,24 +45,6 @@ export function createExpressApp(options: ExpressAppOptions = {}): Application {
   if (options.authService) {
     app.use('/api/auth', createAuthRouter({ authService: options.authService }));
   }
-
-  // Health check (optionally checks auth when ?auth=1)
-  app.get('/api/health', (req: Request, res: Response) => {
-    // If auth query parameter is present, check authentication
-    if (req.query.auth === '1' && options.authService) {
-      const sessionId = parseCookie(req.headers.cookie || '', COOKIE_NAME);
-
-      if (!sessionId || !options.authService.validateSession(sessionId)) {
-        return res.status(401).json({
-          error: 'Unauthorized',
-          code: 'AUTH_REQUIRED'
-        });
-      }
-    }
-
-    // Return normal health response
-    return res.json({ status: 'ok', version: packageJson.version });
-  });
 
   // Root route - check auth and redirect to login if needed
   app.get('/', (req: Request, res: Response) => {
@@ -102,6 +83,7 @@ export function createExpressApp(options: ExpressAppOptions = {}): Application {
     devMode: options.devMode,
     shellEnabled: options.shellEnabled,
     onShutdown: options.onShutdown,
+    authService: options.authService,
   }));
 
   app.use(createErrorHandler());

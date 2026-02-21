@@ -37,7 +37,7 @@
 
   function generateToolbarHtml(oneOffId) {
     var permMode = state.permissionMode || 'plan';
-    var modelValue = state.currentProjectModel || 'claude-opus-4-6';
+    var modelValue = state.currentProjectModel || 'claude-sonnet-4-6';
     var fontSize = state.fontSize || 14;
 
     return '<div class="oneoff-toolbar flex items-center justify-between gap-2 p-2 border-b border-gray-700" data-oneoff-id="' + oneOffId + '">' +
@@ -140,6 +140,7 @@
   function generateModelSelector(oneOffId, modelValue) {
     var models = [
       { value: 'claude-opus-4-6', label: 'Opus 4.6' },
+      { value: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
       { value: 'claude-sonnet-4-5-20250929', label: 'Sonnet 4.5' },
       { value: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' }
     ];
@@ -494,7 +495,7 @@
   }
 
   function syncModel(modelValue) {
-    $('.oneoff-model-select').val(modelValue || 'claude-opus-4-6');
+    $('.oneoff-model-select').val(modelValue || 'claude-sonnet-4-6');
   }
 
   function syncFontSize(size) {

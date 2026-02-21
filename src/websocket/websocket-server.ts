@@ -8,6 +8,7 @@ import { ConversationRepository, ProjectRepository } from '../repositories';
 import { getLogger, Logger, getLogStore, LogEntry } from '../utils/logger';
 import { parseCookie, COOKIE_NAME } from '../middleware/auth-middleware';
 import { ResourceStats, ResourceEventData } from './types';
+import { DockerBuildProgressData } from '../services/docker/types';
 
 export interface ConnectedClient {
   clientId: string;
@@ -162,6 +163,7 @@ export type WebSocketMessageData =
   | GitHubCloneProgressData
   | RunConfigOutputData
   | RunConfigStatusData
+  | DockerBuildProgressData
   | string; // Covers 'connected' messages and simple loop events
 
 export interface SessionRecoveryData {
@@ -198,9 +200,15 @@ export interface WebSocketMessage {
     | 'github_clone_progress'
     | 'run_config_output'
     | 'run_config_status'
+    | 'docker_build_progress'
+    | 'docker_fallback_warning'
 ;
   projectId?: string;
-  data?: WebSocketMessageData | SessionRecoveryData;
+  data?: WebSocketMessageData | SessionRecoveryData | DockerFallbackWarningData;
+}
+
+export interface DockerFallbackWarningData {
+  reason: string;
 }
 
 export interface ProjectWebSocketServer {
@@ -556,6 +564,14 @@ export class DefaultWebSocketServer implements ProjectWebSocketServer {
           newConversationId,
           reason,
         },
+      });
+    });
+
+    this.agentManager.on('dockerFallbackWarning', (projectId, reason) => {
+      this.broadcastToProject(projectId, {
+        type: 'docker_fallback_warning',
+        projectId,
+        data: { reason },
       });
     });
 

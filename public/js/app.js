@@ -166,7 +166,9 @@
     deferredPlanMessage: null, // Stores ExitPlanMode message when questions are pending
     settings: null, // Global settings object
     selectedGitHubRepo: null, // Selected repo full name for GitHub clone
-    submittedQuestionToolIds: {} // Track toolIds already submitted to prevent duplicates
+    submittedQuestionToolIds: {}, // Track toolIds already submitted to prevent duplicates
+    currentDockerImage: null, // Per-project Docker image override (null = use global)
+    currentEffectiveImage: null // Effective Docker image name being used
   };
 
   // Local storage keys - use module's KEYS
@@ -382,7 +384,6 @@
         $('#confirm-modal-ok').off('click.confirm');
         $('#confirm-modal-cancel').off('click.confirm');
         $('#modal-confirm .modal-close').off('click.confirm');
-        $('#modal-confirm .modal-backdrop').off('click.confirm');
         $('#modal-confirm').addClass('hidden');
       };
 
@@ -391,7 +392,7 @@
         resolve(true);
       });
 
-      $('#confirm-modal-cancel, #modal-confirm .modal-close, #modal-confirm .modal-backdrop').on('click.confirm', function() {
+      $('#confirm-modal-cancel, #modal-confirm .modal-close').on('click.confirm', function() {
         cleanup();
         resolve(false);
       });
@@ -416,7 +417,6 @@
       var cleanup = function() {
         $('#form-prompt').off('submit.prompt');
         $('#modal-prompt .modal-close').off('click.prompt');
-        $('#modal-prompt .modal-backdrop').off('click.prompt');
         $('#modal-prompt').addClass('hidden');
       };
 
@@ -427,7 +427,7 @@
         resolve(value || null);
       });
 
-      $('#modal-prompt .modal-close, #modal-prompt .modal-backdrop').on('click.prompt', function() {
+      $('#modal-prompt .modal-close').on('click.prompt', function() {
         cleanup();
         resolve(null);
       });
@@ -541,6 +541,7 @@
     var isOpen = !$dropdown.hasClass('hidden');
 
     closeAllToolbarDropdowns();
+    QuickActionsModule.closeQuickActions();
 
     if (!isOpen) {
       var offset = $btn.offset();
@@ -1371,6 +1372,20 @@
       // Show/hide tab content
       $('.settings-tab-content').addClass('hidden');
       $('#settings-tab-' + tabName).removeClass('hidden');
+
+      // Lazy-load tab data
+      if (tabName === 'github') {
+        loadGitHubStatus();
+      }
+
+      if (tabName === 'docker' && typeof DockerModule !== 'undefined') {
+        DockerModule.onSettingsTabOpen();
+      }
+    });
+
+    // GitHub tab - Refresh button
+    $('#btn-refresh-github-status').on('click', function() {
+      loadGitHubStatus();
     });
 
     // Wipe All Data - open confirmation modal
@@ -1429,10 +1444,6 @@
       DebugModal.open();
     });
 
-    $('#btn-ralph-loop').on('click', function() {
-      openRalphLoopConfigModal();
-    });
-
     $('#btn-agent-mode').on('click', function() {
       if (state.isRalphLoopRunning) {
         showToast('Please stop the Ralph Loop before switching to Agent mode', 'warning');
@@ -1481,23 +1492,6 @@
       }
     });
 
-    $('.modal-backdrop').on('click', function() {
-      var $modal = $(this).parent('.modal');
-
-      if ($modal.attr('id') === 'modal-roadmap-progress' && state.roadmapGenerating) {
-        return;
-      }
-
-      if ($modal.attr('id') === 'modal-settings' && state.hasUnsavedMcpChanges) {
-        checkUnsavedMcpChanges().then(function(shouldClose) {
-          if (shouldClose) {
-            closeAllModals();
-          }
-        });
-      } else {
-        closeAllModals();
-      }
-    });
 
     // Tool message click handler - open detail modal
     $(document).on('click', '.conversation-message.tool-use', function(e) {
@@ -1591,28 +1585,6 @@
       confirmDeletePhase();
     });
 
-    // Roadmap selection handlers
-    $(document).on('change', '.roadmap-select-milestone', function() {
-      var $checkbox = $(this);
-      var milestoneId = $checkbox.data('milestone-id');
-      var isChecked = $checkbox.is(':checked');
-
-      // Select/deselect all tasks under this milestone
-      $('.roadmap-select-task[data-milestone-id="' + milestoneId + '"]:not(:disabled)').prop('checked', isChecked);
-      updateRoadmapSelectionUI();
-    });
-
-    $(document).on('change', '.roadmap-select-task', function() {
-      updateRoadmapSelectionUI();
-    });
-
-    $('#btn-clear-roadmap-selection').on('click', function() {
-      clearRoadmapSelection();
-    });
-
-    $('#btn-run-selected-tasks').on('click', function() {
-      runSelectedRoadmapTasks();
-    });
 
     // Font size controls for agent output
     $('#btn-font-decrease').on('click', function() {
@@ -1722,8 +1694,12 @@
         state.chromeEnabled = settings.chromeEnabled ?? false;
         updateChromeToggleButton();
 
+        // Docker settings
+        if (typeof DockerModule !== 'undefined') {
+          DockerModule.populateSettingsFields(settings);
+        }
+
         openModal('modal-settings');
-        loadGitHubStatus();
       })
       .fail(function(xhr) {
         showErrorToast(xhr, 'Failed to load settings');
@@ -1906,7 +1882,8 @@
       mcp: {
         enabled: $('#input-mcp-enabled').is(':checked'),
         servers: state.settings.mcp?.servers || []
-      }
+      },
+      docker: typeof DockerModule !== 'undefined' ? DockerModule.collectSettingsFields() : undefined
     };
 
     // Request notification permission if enabling notifications
@@ -1932,6 +1909,9 @@
         if (typeof PermissionModeModule !== 'undefined') {
           PermissionModeModule.updateSkipPermissionsWarning();
         }
+
+        // Refresh docker indicator (global docker settings may have changed)
+        loadDockerStatus(state.selectedProjectId);
 
         closeAllModals();
         showToast('Settings saved', 'success');
@@ -2344,6 +2324,11 @@
       TaskDisplayModule.openOptimizationsModal();
     });
 
+    $('#btn-ralph-loop').on('click', function() {
+      closeAllToolbarDropdowns();
+      openRalphLoopConfigModal();
+    });
+
     // GitHub dropdown
     $('#btn-github-menu').on('click', function(e) {
       e.stopPropagation();
@@ -2357,6 +2342,7 @@
     // Quick Actions button
     $('#btn-quick-actions').on('click', function(e) {
       e.stopPropagation();
+      closeAllToolbarDropdowns();
       QuickActionsModule.toggleQuickActions();
     });
 
@@ -2381,6 +2367,24 @@
       if (!$(e.target).closest('#optimizations-dropdown, #btn-optimizations-menu, #github-dropdown, #btn-github-menu').length) {
         closeAllToolbarDropdowns();
       }
+
+      // Close docker image dropdown on outside click
+      if (!$(e.target).closest('#docker-host-indicator').length) {
+        $('#docker-image-dropdown').addClass('hidden');
+      }
+    });
+
+    // Docker indicator click - toggle image selector dropdown
+    $(document).on('click', '#docker-indicator-btn', function(e) {
+      e.stopPropagation();
+      toggleDockerImageDropdown();
+    });
+
+    // Docker image dropdown item selection
+    $(document).on('click', '.docker-image-option', function(e) {
+      e.stopPropagation();
+      var selectedImage = $(this).data('image');
+      handleDockerImageSelection(selectedImage);
     });
 
     // Search button
@@ -3114,48 +3118,11 @@
   }
 
   function updateStartStopButtons() {
-    var project = findProjectById(state.selectedProjectId);
-    var isRunning = project && project.status === 'running';
-    var hasSession = !!state.currentSessionId;
-
-    // Hide loop controls (not used in interactive mode)
-    $('#loop-controls').addClass('hidden');
-
-    if (isRunning) {
-      // Agent is running: show Stop + Restart, hide Start
-      $('#btn-start-agent').addClass('hidden');
-      $('#btn-stop-agent').removeClass('hidden');
-      $('#btn-restart-agent').removeClass('hidden');
-    } else {
-      // Agent not running: show Start, hide Stop + Restart
-      $('#btn-start-agent').removeClass('hidden');
-      $('#btn-stop-agent').addClass('hidden');
-      $('#btn-restart-agent').addClass('hidden');
-    }
+    AgentControlsModule.updateStartStopButtons();
   }
 
   function updateInputArea() {
-    var project = findProjectById(state.selectedProjectId);
-    var isRunning = project && project.status === 'running';
-    var isInteractive = state.currentAgentMode === 'interactive';
-    var isInteractiveMode = true; // Always in interactive mode now
-
-    // Interactive mode: always enable input (will auto-start agent if needed)
-    if (isInteractiveMode) {
-      $('#input-message').prop('disabled', false);
-      $('#btn-send-message').prop('disabled', false);
-      updateInputHint();
-    } else if (isRunning && !isInteractive) {
-      // Autonomous mode running
-      $('#input-message').prop('disabled', true);
-      $('#btn-send-message').prop('disabled', true);
-      $('#input-hint-text').text('Agent is running in autonomous mode');
-    } else {
-      // Autonomous mode not running
-      $('#input-message').prop('disabled', true);
-      $('#btn-send-message').prop('disabled', true);
-      $('#input-hint-text').text('Click Start to run the autonomous agent loop');
-    }
+    AgentControlsModule.updateInputArea();
   }
 
   function sendMessage() {
@@ -3289,6 +3256,13 @@
         state.currentAgentMode = 'interactive';
         updateProjectStatusById(projectId, 'running');
         startAgentStatusPolling(projectId);
+
+        // Show warning if Docker fell back to host execution
+        if (response && response.dockerFallback) {
+          showToast('Docker container failed to start: ' + (response.dockerFallbackReason || 'unknown error') + '. Falling back to host execution.', 'warning');
+        } else if (response && response.containerRestarted) {
+          showToast('Docker container was started with image: ' + (response.containerImageName || 'unknown'), 'info');
+        }
 
         // Update session and conversation IDs from response
         if (response && response.sessionId) {
@@ -3561,6 +3535,7 @@
     renderProjectDetail(project);
     loadAgentStatus(projectId);
     loadRalphLoopStatus(projectId);
+    loadDockerStatus(projectId);
     TaskDisplayModule.loadOptimizationsBadge(projectId);
     checkGitHubAvailable();
 
@@ -3659,6 +3634,126 @@
     loadProjectModel(projectId);
   }
 
+  function loadDockerStatus(projectId) {
+    if (!projectId) {
+      $('#docker-host-indicator').addClass('hidden');
+      return;
+    }
+
+    api.getProjectDocker(projectId)
+      .done(function(data) {
+        updateDockerIndicator(data.effectiveDocker, data.imageName, data.dockerImage);
+      })
+      .fail(function() {
+        $('#docker-host-indicator').addClass('hidden');
+      });
+  }
+
+  function getShortImageName(imageName) {
+    if (!imageName) return '';
+
+    // Strip common registry prefixes and show just name:tag
+    var parts = imageName.split('/');
+    return parts[parts.length - 1] || imageName;
+  }
+
+  function updateDockerIndicator(effectiveDocker, imageName, dockerImage) {
+    var $indicator = $('#docker-host-indicator');
+    var $icon = $('#docker-indicator-icon');
+    var $btn = $('#docker-indicator-btn');
+    var $label = $('#docker-indicator-label');
+
+    $indicator.removeClass('hidden');
+
+    // Store current docker image state for dropdown
+    state.currentDockerImage = dockerImage || null;
+    state.currentEffectiveImage = imageName || null;
+
+    if (effectiveDocker) {
+      $indicator.removeClass('text-gray-500').addClass('text-cyan-400');
+      $icon.html('<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 3H3v7h18V3zM21 14H3v7h18v-7zM7 6.5h.01M7 17.5h.01"/>');
+      var shortName = getShortImageName(imageName);
+      $label.text(shortName).removeClass('hidden');
+      $btn.attr('title', 'Docker: ' + (imageName || 'default') + ' (click to change)');
+    } else {
+      $indicator.removeClass('text-cyan-400').addClass('text-gray-500');
+      $icon.html('<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>');
+      $label.text('').addClass('hidden');
+      $btn.attr('title', 'Running on host machine');
+    }
+  }
+
+  function toggleDockerImageDropdown() {
+    var $dropdown = $('#docker-image-dropdown');
+
+    if (!$dropdown.hasClass('hidden')) {
+      $dropdown.addClass('hidden');
+      return;
+    }
+
+    // Only show dropdown when Docker is effective
+    if (!state.currentEffectiveImage) return;
+
+    $dropdown.html('<div class="px-3 py-2 text-gray-400 text-xs">Loading images...</div>');
+    $dropdown.removeClass('hidden');
+
+    api.getDockerImages()
+      .done(function(images) {
+        renderDockerImageDropdown(images);
+      })
+      .fail(function() {
+        $dropdown.html('<div class="px-3 py-2 text-red-400 text-xs">Failed to load images</div>');
+      });
+  }
+
+  function renderDockerImageDropdown(images) {
+    var $dropdown = $('#docker-image-dropdown');
+    var html = '';
+    var currentImage = state.currentDockerImage;
+
+    // "Use default" option
+    var isDefault = !currentImage;
+    html += '<button class="docker-image-option w-full text-left px-3 py-1.5 text-xs hover:bg-gray-700 transition-colors flex items-center gap-2' +
+      (isDefault ? ' text-cyan-400' : ' text-gray-300') + '" data-image="">' +
+      (isDefault ? '<span class="text-cyan-400">*</span>' : '<span class="w-2"></span>') +
+      '<span>Default (global setting)</span></button>';
+
+    for (var i = 0; i < images.length; i++) {
+      var img = images[i];
+      var fullName = img.name + ':' + img.tag;
+      var isSelected = currentImage === fullName;
+      html += '<button class="docker-image-option w-full text-left px-3 py-1.5 text-xs hover:bg-gray-700 transition-colors flex items-center gap-2' +
+        (isSelected ? ' text-cyan-400' : ' text-gray-300') + '" data-image="' + escapeHtml(fullName) + '">' +
+        (isSelected ? '<span class="text-cyan-400">*</span>' : '<span class="w-2"></span>') +
+        '<span>' + escapeHtml(fullName) + '</span></button>';
+    }
+
+    if (images.length === 0) {
+      html += '<div class="px-3 py-2 text-gray-500 text-xs">No images found</div>';
+    }
+
+    $dropdown.html(html);
+  }
+
+  function handleDockerImageSelection(selectedImage) {
+    var $dropdown = $('#docker-image-dropdown');
+    $dropdown.addClass('hidden');
+
+    var projectId = state.selectedProjectId;
+    if (!projectId) return;
+
+    var dockerImage = selectedImage || null;
+
+    api.setProjectDocker(projectId, { dockerImage: dockerImage })
+      .done(function() {
+        loadDockerStatus(projectId);
+        showToast('Image will take effect on next agent start', 'info');
+      })
+      .fail(function() {
+        showToast('Failed to update Docker image', 'error');
+      });
+  }
+
   function loadRalphLoopStatus(projectId) {
     if (!projectId) return;
 
@@ -3708,7 +3803,7 @@
       .done(function(data) {
         // data = { projectModel, effectiveModel, globalDefault }
         // If no project override, default to Opus
-        var modelValue = data.projectModel || 'claude-opus-4-6';
+        var modelValue = data.projectModel || 'claude-sonnet-4-6';
         $('#project-model-select').val(modelValue);
         state.currentProjectModel = data.projectModel;
         state.effectiveModel = data.effectiveModel;
@@ -3716,8 +3811,8 @@
         updateModelSelectorTitle(data);
       })
       .fail(function() {
-        // On failure, default to Opus
-        $('#project-model-select').val('claude-opus-4-6');
+        // On failure, default to Sonnet 4.6
+        $('#project-model-select').val('claude-sonnet-4-6');
         state.currentProjectModel = null;
       });
   }
@@ -3728,7 +3823,7 @@
     if (modelData.projectModel) {
       title = 'Using: ' + getModelDisplayName(modelData.projectModel) + ' (project override)';
     } else {
-      title = 'Using: Opus 4.6 (default)';
+      title = 'Using: Sonnet 4.6 (default)';
     }
 
     $('#model-selector').attr('title', title);
@@ -3737,6 +3832,7 @@
   function getModelDisplayName(modelId) {
     var displayNames = {
       'claude-opus-4-6': 'Opus 4.6',
+      'claude-sonnet-4-6': 'Sonnet 4.6',
       'claude-sonnet-4-5-20250929': 'Sonnet 4.5',
       'claude-haiku-4-5-20251001': 'Haiku 4.5'
     };
@@ -3778,22 +3874,13 @@
       })
       .fail(function(xhr) {
         // Revert the selector to the previous value or Opus if no override
-        $('#project-model-select').val(state.currentProjectModel || 'claude-opus-4-6');
+        $('#project-model-select').val(state.currentProjectModel || 'claude-sonnet-4-6');
         showErrorToast(xhr, 'Failed to change model');
       });
   }
 
   function showAgentRunningIndicator(isRunning, statusText) {
-    var spinner = $('#agent-output-spinner');
-    var label = $('#agent-status-label');
-
-    if (isRunning) {
-      spinner.removeClass('hidden');
-      label.text(statusText || 'Agent running...').removeClass('hidden');
-    } else {
-      spinner.addClass('hidden');
-      label.addClass('hidden');
-    }
+    AgentControlsModule.showAgentRunningIndicator(isRunning, statusText);
   }
 
   function checkShellEnabled(projectId) {
@@ -4297,16 +4384,7 @@
   }
 
   function updateCancelButton() {
-    var project = findProjectById(state.selectedProjectId);
-    var isRunning = project && project.status === 'running';
-    var isWaiting = project && project.isWaitingForInput;
-
-    // Show cancel button when agent is running but NOT waiting for input (i.e., actively processing)
-    if (isRunning && !isWaiting) {
-      $('#btn-cancel-agent').removeClass('hidden');
-    } else {
-      $('#btn-cancel-agent').addClass('hidden');
-    }
+    AgentControlsModule.updateCancelButton();
   }
 
   // Agent status polling - reduced to 10 seconds as fallback (WebSocket is primary)
@@ -4483,11 +4561,11 @@
         // Always default to Opus for worker model
         var workerModel = state.settings?.ralphLoop?.defaultWorkerModel || 'claude-opus-4-6';
         // Override old model IDs with new defaults
-        if (workerModel === 'claude-sonnet-4-20250514' || workerModel === 'claude-opus-4-20250514') {
+        if (workerModel === 'claude-sonnet-4-20250514' || workerModel === 'claude-opus-4-20250514' || workerModel === 'claude-sonnet-4-5-20250929') {
           workerModel = 'claude-opus-4-6';
         }
         $('#ralph-config-worker-model').val(workerModel);
-        $('#ralph-config-reviewer-model').val(state.settings?.ralphLoop?.defaultReviewerModel || 'claude-sonnet-4-5-20250929');
+        $('#ralph-config-reviewer-model').val(state.settings?.ralphLoop?.defaultReviewerModel || 'claude-sonnet-4-6');
         $('#ralph-config-worker-system-prompt').val('');
         $('#ralph-config-reviewer-system-prompt').val('');
 
@@ -4514,11 +4592,11 @@
         // Always default to Opus for worker model
         var workerModel = state.settings?.ralphLoop?.defaultWorkerModel || 'claude-opus-4-6';
         // Override old model IDs with new defaults
-        if (workerModel === 'claude-sonnet-4-20250514' || workerModel === 'claude-opus-4-20250514') {
+        if (workerModel === 'claude-sonnet-4-20250514' || workerModel === 'claude-opus-4-20250514' || workerModel === 'claude-sonnet-4-5-20250929') {
           workerModel = 'claude-opus-4-6';
         }
         $('#ralph-config-worker-model').val(workerModel);
-        $('#ralph-config-reviewer-model').val(state.settings?.ralphLoop?.defaultReviewerModel || 'claude-sonnet-4-5-20250929');
+        $('#ralph-config-reviewer-model').val(state.settings?.ralphLoop?.defaultReviewerModel || 'claude-sonnet-4-6');
         $('#ralph-config-worker-system-prompt').val('');
         $('#ralph-config-reviewer-system-prompt').val('');
 
@@ -4781,23 +4859,7 @@
   }
 
   function formatRalphLoopStatusForLabel(status) {
-    var baseText;
-    switch (status) {
-      case 'worker_running': baseText = 'Worker running...'; break;
-      case 'reviewer_running': baseText = 'Reviewer running...'; break;
-      case 'paused': baseText = 'Ralph Loop paused'; break;
-      default: baseText = 'Ralph Loop: ' + status; break;
-    }
-
-    // Add iteration info if available
-    if (state.ralphLoopCurrentIteration !== null && state.ralphLoopCurrentIteration !== undefined &&
-        state.ralphLoopMaxTurns !== null && state.ralphLoopMaxTurns !== undefined) {
-      var remainingTurns = state.ralphLoopMaxTurns - state.ralphLoopCurrentIteration;
-      return baseText + ' (Iteration ' + state.ralphLoopCurrentIteration + '/' + state.ralphLoopMaxTurns +
-             ', ' + remainingTurns + ' left)';
-    }
-
-    return baseText;
+    return AgentControlsModule.formatRalphLoopStatusForLabel(status);
   }
 
   function updateRalphLoopPauseButton(status) {
@@ -4881,52 +4943,7 @@
   }
 
   function updateRalphLoopControls(status) {
-    var isActive = status && status !== 'idle' && status !== 'completed' && status !== 'failed';
-
-    if (!isActive) {
-      // Hide Ralph Loop UI
-      showAgentRunningIndicator(false);
-      $('#btn-stop-agent').addClass('hidden');
-      $('#btn-restart-agent').addClass('hidden');
-      $('#btn-ralph-loop-pause').addClass('hidden');
-      $('#btn-agent-mode').addClass('hidden');
-      $('#form-send-message').removeClass('opacity-50');
-      $('#input-message').prop('disabled', false);
-      $('#btn-send-message').prop('disabled', false);
-      state.isRalphLoopRunning = false;
-
-      // Mark project as stopped if no agent is running
-      var project = findProjectById(state.selectedProjectId);
-      var isAgentRunning = project && project.status === 'running' && !state.isRalphLoopRunning;
-      if (state.selectedProjectId && !isAgentRunning) {
-        updateProjectStatusById(state.selectedProjectId, 'stopped');
-      }
-    } else {
-      // Show Ralph Loop status in agent status label
-      var statusText = formatRalphLoopStatusForLabel(status);
-      showAgentRunningIndicator(true, statusText);
-
-      // Show appropriate buttons
-      $('#btn-stop-agent').removeClass('hidden');
-      $('#btn-restart-agent').removeClass('hidden');
-      $('#btn-agent-mode').removeClass('hidden');  // Show Agent Mode button
-
-      // Update pause button with appropriate state
-      updateRalphLoopPauseButton(status);
-      if (status === 'paused' || status === 'worker_running' || status === 'reviewer_running') {
-        $('#btn-ralph-loop-pause').removeClass('hidden');
-      } else {
-        $('#btn-ralph-loop-pause').addClass('hidden');
-      }
-
-      $('#form-send-message').addClass('opacity-50');
-      $('#input-message').prop('disabled', true);
-      $('#btn-send-message').prop('disabled', true);
-      state.isRalphLoopRunning = true;
-
-      // Mark project as running
-      updateProjectStatusById(state.selectedProjectId, 'running');
-    }
+    AgentControlsModule.updateRalphLoopControls(status);
   }
 
   function resumeRalphLoop() {
@@ -5136,6 +5153,11 @@
       case 'session_recovery':
         handleSessionRecovery(message.projectId, message.data);
         break;
+      case 'docker_fallback_warning':
+        if (message.data && message.data.reason) {
+          showToast('Docker container failed: ' + message.data.reason + '. Falling back to host execution.', 'warning');
+        }
+        break;
       case 'shell_output':
         ShellModule.handleShellOutput(message.data);
         break;
@@ -5216,6 +5238,11 @@
       case 'run_config_status':
         if (RunConfigsModule) {
           RunConfigsModule.handleStatusChange(message.data);
+        }
+        break;
+      case 'docker_build_progress':
+        if (typeof DockerModule !== 'undefined') {
+          DockerModule.handleBuildProgress(message.data);
         }
         break;
     }
@@ -5997,6 +6024,14 @@
       closeModal: closeModal
     });
 
+    AgentControlsModule.init({
+      state: state,
+      findProjectById: findProjectById,
+      updateProjectStatusById: updateProjectStatusById,
+      updateInputHint: updateInputHint,
+      updateRalphLoopPauseButton: updateRalphLoopPauseButton
+    });
+
     FolderBrowserModule.init({
       state: state,
       api: api,
@@ -6073,6 +6108,15 @@
         selectProject: selectProject,
         loadProjects: loadProjects,
         startInteractiveAgentWithMessage: startInteractiveAgentWithMessage,
+      });
+    }
+
+    if (typeof DockerModule !== 'undefined') {
+      DockerModule.init({
+        api: api,
+        state: state,
+        showToast: showToast,
+        showErrorToast: showErrorToast,
       });
     }
 
@@ -6183,7 +6227,41 @@
         if (data.shellEnabled !== undefined) {
           state.shellEnabled = data.shellEnabled;
         }
+
+        handleClaudeCliInfo(data.claudeCli);
       });
+  }
+
+  function handleClaudeCliInfo(claudeCli) {
+    console.log('[claudito] Claude CLI info:', claudeCli);
+
+    if (!claudeCli || !claudeCli.installed) {
+      console.warn('[claudito] Claude CLI not installed or info missing');
+      $('#claude-auth-warning-message').text(
+        'Claude CLI is not installed. Please install it and log in before using Claudito.'
+      );
+      openModal('modal-claude-auth-warning');
+      return;
+    }
+
+    if (!claudeCli.auth || !claudeCli.auth.loggedIn) {
+      console.warn('[claudito] Claude CLI not authenticated');
+      openModal('modal-claude-auth-warning');
+      return;
+    }
+
+    updateClaudeCliFooter(claudeCli);
+  }
+
+  function updateClaudeCliFooter(claudeCli) {
+    var email = claudeCli.auth.email || '';
+    var plan = claudeCli.auth.subscriptionType || '';
+    var version = claudeCli.version || '';
+
+    $('#claude-cli-email').text(email);
+    $('#claude-cli-plan').text(plan);
+    $('#claude-cli-version').text(version);
+    $('#claude-cli-info').removeClass('hidden');
   }
 
   // Start the app when document is ready

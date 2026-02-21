@@ -1,3 +1,4 @@
+import path from 'path';
 import { Router } from 'express';
 import { createFilesystemRouter, createFilesystemService } from './filesystem';
 import { createProjectsRouter } from './projects';
@@ -21,6 +22,9 @@ import {
   DefaultRunConfigImportService,
   InventifyService,
   DefaultInventifyService,
+  ClaudeCliService,
+  ClaudeCliInfo,
+  createClaudeCliService,
 } from '../services';
 import { RunProcessManager } from '../services/run-config/run-process-types';
 import { createGitService } from '../services/git-service';
@@ -28,6 +32,9 @@ import { createShellService, ShellService } from '../services/shell-service';
 import { createGitHubCLIService, GitHubCLIService } from '../services/github-cli-service';
 import { createIntegrationsRouter } from './integrations';
 import { DefaultAgentManager, AgentManager } from '../agents';
+import { DefaultDockerService, DefaultContainerManager, DefaultDockerCommandRunner, DefaultImageManager } from '../services/docker';
+import { DockerService, ContainerManager, ImageManager } from '../services/docker/types';
+import { createDockerRouter } from './docker';
 import { DefaultRalphLoopService } from '../services/ralph-loop/ralph-loop-service';
 import { RalphLoopService } from '../services/ralph-loop/types';
 import { FileRalphLoopRepository } from '../repositories/ralph-loop';
@@ -35,6 +42,8 @@ import { getDataDirectory, getLogger, getGlobalLogs } from '../utils';
 import { RoadmapGenerator } from '../services';
 import { ProjectWebSocketServer } from '../websocket';
 import { ProjectDiscoveryService, DefaultProjectDiscoveryService } from '../services/project-discovery';
+import { AuthService } from '../services/auth-service';
+import { parseCookie, COOKIE_NAME } from '../middleware/auth-middleware';
 import packageJson from '../../package.json';
 
 const frontendLogger = getLogger('frontend');
@@ -52,6 +61,11 @@ let sharedGitHubCLIService: GitHubCLIService | null = null;
 let sharedRunConfigurationService: RunConfigurationService | null = null;
 let sharedRunProcessManager: RunProcessManager | null = null;
 let sharedInventifyService: InventifyService | null = null;
+let sharedDockerService: DockerService | null = null;
+let sharedContainerManager: ContainerManager | null = null;
+let sharedImageManager: ImageManager | null = null;
+let sharedClaudeCliService: ClaudeCliService | null = null;
+let cachedClaudeCliInfo: ClaudeCliInfo | null = null;
 
 export interface ApiRouterDependencies {
   agentManager?: AgentManager;
@@ -59,6 +73,7 @@ export interface ApiRouterDependencies {
   devMode?: boolean;
   shellEnabled?: boolean;
   onShutdown?: () => void;
+  authService?: AuthService;
 }
 
 export function createApiRouter(deps: ApiRouterDependencies = {}): Router {
@@ -86,6 +101,10 @@ export function createApiRouter(deps: ApiRouterDependencies = {}): Router {
   const roadmapGenerator = getOrCreateRoadmapGenerator();
   const instructionGenerator = new DefaultInstructionGenerator();
 
+  // Docker service & container manager (needed by agent manager)
+  const dockerService = getOrCreateDockerService();
+  const containerManager = getOrCreateContainerManager(dockerService, settingsRepository);
+
   // Agent Manager (singleton for WebSocket integration)
   const agentManager = deps.agentManager || getOrCreateAgentManager({
     projectRepository,
@@ -93,16 +112,47 @@ export function createApiRouter(deps: ApiRouterDependencies = {}): Router {
     settingsRepository,
     instructionGenerator,
     roadmapParser,
+    containerManager,
     maxConcurrentAgents: deps.maxConcurrentAgents,
   });
 
-  // Health check
-  router.get('/health', (_req, res) => {
+  // Claude CLI info (eagerly fetch and cache on startup)
+  const cliLogger = getLogger('claude-cli');
+  const claudeCliService = getOrCreateClaudeCliService();
+  const claudeCliInfoPromise = claudeCliService.getInfo().catch((): ClaudeCliInfo => {
+    return { installed: false, version: null, auth: null, error: 'Failed to check Claude CLI' };
+  });
+
+  void claudeCliInfoPromise.then((info) => {
+    cachedClaudeCliInfo = info;
+    cliLogger.info('Claude CLI info resolved', {
+      installed: info.installed,
+      version: info.version,
+      loggedIn: info.auth?.loggedIn ?? false,
+    });
+  });
+
+  // Health check (public; optionally checks auth when ?auth=1)
+  router.get('/health', async (req, res) => {
+    if (req.query.auth === '1' && deps.authService) {
+      const sessionId = parseCookie(req.headers.cookie, COOKIE_NAME);
+
+      if (!sessionId || !deps.authService.validateSession(sessionId)) {
+        res.status(401).json({ error: 'Unauthorized', code: 'AUTH_REQUIRED' });
+        return;
+      }
+    }
+
+    if (!cachedClaudeCliInfo) {
+      cachedClaudeCliInfo = await claudeCliInfoPromise;
+    }
+
     res.json({
       status: 'ok',
       version: packageJson.version,
       timestamp: new Date().toISOString(),
       shellEnabled: deps.shellEnabled !== false,
+      claudeCli: cachedClaudeCliInfo,
     });
   });
 
@@ -264,6 +314,22 @@ export function createApiRouter(deps: ApiRouterDependencies = {}): Router {
     settingsRepository,
   );
 
+  // Docker routes
+  const imageManager = getOrCreateImageManager();
+  router.use('/docker', createDockerRouter({
+    dockerService,
+    containerManager,
+    imageManager,
+    settingsRepository,
+    broadcast: (message) => {
+      const ws = getWebSocketServer();
+
+      if (ws) {
+        ws.broadcast(message);
+      }
+    },
+  }));
+
   // Project routes
   router.use('/projects', createProjectsRouter({
     projectRepository,
@@ -296,6 +362,7 @@ interface AgentManagerConfig {
   settingsRepository: FileSettingsRepository;
   instructionGenerator: DefaultInstructionGenerator;
   roadmapParser: MarkdownRoadmapParser;
+  containerManager?: ContainerManager;
   maxConcurrentAgents?: number;
 }
 
@@ -307,6 +374,7 @@ function getOrCreateAgentManager(config: AgentManagerConfig): AgentManager {
       settingsRepository: config.settingsRepository,
       instructionGenerator: config.instructionGenerator,
       roadmapParser: config.roadmapParser,
+      containerManager: config.containerManager,
       maxConcurrentAgents: config.maxConcurrentAgents,
     });
   }
@@ -474,4 +542,65 @@ function getOrCreateInventifyService(
 
 export function getInventifyService(): InventifyService | null {
   return sharedInventifyService;
+}
+
+function getOrCreateDockerService(): DockerService {
+  if (!sharedDockerService) {
+    const commandRunner = new DefaultDockerCommandRunner();
+    const logger = getLogger('docker');
+    sharedDockerService = new DefaultDockerService({ commandRunner, logger });
+  }
+  return sharedDockerService;
+}
+
+export function getDockerService(): DockerService | null {
+  return sharedDockerService;
+}
+
+function getOrCreateContainerManager(
+  dockerService: DockerService,
+  settingsRepository: FileSettingsRepository,
+): ContainerManager {
+  if (!sharedContainerManager) {
+    const logger = getLogger('container-manager');
+    sharedContainerManager = new DefaultContainerManager({
+      dockerService,
+      settingsRepository,
+      logger,
+    });
+  }
+  return sharedContainerManager;
+}
+
+export function getContainerManager(): ContainerManager | null {
+  return sharedContainerManager;
+}
+
+function getOrCreateImageManager(): ImageManager {
+  if (!sharedImageManager) {
+    const commandRunner = new DefaultDockerCommandRunner();
+    const logger = getLogger('image-manager');
+    const variantsDir = path.resolve(__dirname, '../../docker');
+    sharedImageManager = new DefaultImageManager({
+      commandRunner,
+      variantsDir,
+      logger,
+    });
+  }
+  return sharedImageManager;
+}
+
+export function getImageManager(): ImageManager | null {
+  return sharedImageManager;
+}
+
+function getOrCreateClaudeCliService(): ClaudeCliService {
+  if (!sharedClaudeCliService) {
+    sharedClaudeCliService = createClaudeCliService();
+  }
+  return sharedClaudeCliService;
+}
+
+export function getClaudeCliInfo(): ClaudeCliInfo | null {
+  return cachedClaudeCliInfo;
 }

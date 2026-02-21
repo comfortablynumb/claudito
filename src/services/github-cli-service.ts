@@ -1,8 +1,5 @@
 import { execFile, spawn, ChildProcess } from 'child_process';
-import { promisify } from 'util';
 import { GitHubCLIError } from '../utils/errors';
-
-const execFileAsync = promisify(execFile);
 
 // ============================================================================
 // Types
@@ -191,12 +188,25 @@ export interface CommandRunner {
 }
 
 export class DefaultCommandRunner implements CommandRunner {
-  async exec(command: string, args: string[], options?: CommandRunnerOptions): Promise<{ stdout: string; stderr: string }> {
-    if (options?.cwd) {
-      return execFileAsync(command, args, { cwd: options.cwd, encoding: 'utf-8' });
-    }
+  exec(command: string, args: string[], options?: CommandRunnerOptions): Promise<{ stdout: string; stderr: string }> {
+    return new Promise((resolve, reject) => {
+      const child = execFile(
+        command,
+        args,
+        { cwd: options?.cwd, encoding: 'utf-8' },
+        (err, stdout, stderr) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve({ stdout, stderr });
+          }
+        },
+      );
 
-    return execFileAsync(command, args);
+      // Unref so pending child processes don't keep the event loop alive
+      // (safe in production since the HTTP server holds the loop open anyway)
+      child.unref();
+    });
   }
 
   spawn(command: string, args: string[], options?: CommandRunnerOptions): ChildProcess {

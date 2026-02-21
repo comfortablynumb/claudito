@@ -206,7 +206,7 @@ export class MessageBuilder {
    * Build environment variables for Claude CLI.
    */
   static buildEnvironment(env?: Record<string, string>): Record<string, string> {
-    return {
+    const result: Record<string, string> = {
       ...process.env,
       ...env,
       // Force color output for better formatting
@@ -214,6 +214,12 @@ export class MessageBuilder {
       // Disable telemetry
       ANTHROPIC_TELEMETRY: 'false',
     };
+
+    // Remove CLAUDECODE to prevent "nested session" errors when
+    // claudito itself runs inside a Claude Code terminal session
+    delete result['CLAUDECODE'];
+
+    return result;
   }
 
   /**

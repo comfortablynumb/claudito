@@ -50,6 +50,10 @@ export interface ProjectStatus {
   mcpOverrides: McpOverrides | null;
   /** Run configurations for this project */
   runConfigurations?: RunConfiguration[];
+  /** Per-project Docker override: true=force Docker, false=force host, undefined=use global */
+  dockerOverride?: boolean;
+  /** Per-project Docker image override (null/undefined = use global baseImage) */
+  dockerImage?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -94,6 +98,8 @@ export interface ProjectRepository {
   updateModelOverride(id: string, model: string | null): Promise<ProjectStatus | null>;
   updateMcpOverrides(id: string, overrides: McpOverrides | null): Promise<ProjectStatus | null>;
   updateRunConfigurations(id: string, configs: RunConfiguration[]): Promise<ProjectStatus | null>;
+  updateDockerOverride(id: string, dockerOverride: boolean | undefined): Promise<ProjectStatus | null>;
+  updateDockerImage(id: string, dockerImage: string | null): Promise<ProjectStatus | null>;
   updateProjectPath(id: string, newName: string, newPath: string): Promise<ProjectStatus | null>;
   delete(id: string): Promise<boolean>;
 }
@@ -476,6 +482,30 @@ export class FileProjectRepository implements ProjectRepository {
     }
 
     status.runConfigurations = configs;
+    this.saveStatus(status);
+    return Promise.resolve({ ...status });
+  }
+
+  updateDockerOverride(id: string, dockerOverride: boolean | undefined): Promise<ProjectStatus | null> {
+    const status = this.loadStatus(id);
+
+    if (!status) {
+      return Promise.resolve(null);
+    }
+
+    status.dockerOverride = dockerOverride;
+    this.saveStatus(status);
+    return Promise.resolve({ ...status });
+  }
+
+  updateDockerImage(id: string, dockerImage: string | null): Promise<ProjectStatus | null> {
+    const status = this.loadStatus(id);
+
+    if (!status) {
+      return Promise.resolve(null);
+    }
+
+    status.dockerImage = dockerImage;
     this.saveStatus(status);
     return Promise.resolve({ ...status });
   }

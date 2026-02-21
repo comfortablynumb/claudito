@@ -12,6 +12,7 @@ describe('Models Configuration', () => {
     it('should contain expected models', () => {
       expect(SUPPORTED_MODELS).toEqual([
         'claude-opus-4-6',
+        'claude-sonnet-4-6',
         'claude-sonnet-4-5-20250929',
         'claude-haiku-4-5-20251001',
       ]);
@@ -28,8 +29,8 @@ describe('Models Configuration', () => {
       expect(SUPPORTED_MODELS).toContain(DEFAULT_MODEL);
     });
 
-    it('should be claude-opus-4-6', () => {
-      expect(DEFAULT_MODEL).toBe('claude-opus-4-6');
+    it('should be claude-sonnet-4-6', () => {
+      expect(DEFAULT_MODEL).toBe('claude-sonnet-4-6');
     });
   });
 
@@ -44,6 +45,7 @@ describe('Models Configuration', () => {
 
     it('should have correct display names', () => {
       expect(MODEL_DISPLAY_NAMES['claude-opus-4-6']).toBe('Claude Opus 4.6');
+      expect(MODEL_DISPLAY_NAMES['claude-sonnet-4-6']).toBe('Claude Sonnet 4.6');
       expect(MODEL_DISPLAY_NAMES['claude-sonnet-4-5-20250929']).toBe('Claude Sonnet 4.5');
       expect(MODEL_DISPLAY_NAMES['claude-haiku-4-5-20251001']).toBe('Claude Haiku 4.5');
     });

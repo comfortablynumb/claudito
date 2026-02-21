@@ -8,6 +8,7 @@ export {
   AgentResourceStatus,
   ImageData,
   FullAgentStatus,
+  StartAgentResult,
   OneOffAgentOptions,
   OneOffMeta,
 } from './agent-manager';

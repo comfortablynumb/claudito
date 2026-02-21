@@ -13,7 +13,9 @@ import {
   AgentLimits,
   AgentStreamingOptions,
   WaitingStatus,
+  ProcessSpawner,
 } from './claude-agent';
+import { defaultSpawner } from './process-manager';
 import { DefaultPermissionGenerator, PermissionGenerator } from '../services/permission-generator';
 import {
   ProjectRepository,
@@ -24,6 +26,8 @@ import {
   ProjectStatus,
 } from '../repositories';
 import { InstructionGenerator, RoadmapParser } from '../services';
+import { ContainerManager } from '../services/docker/types';
+import { DockerProcessSpawner } from '../services/docker/docker-process-spawner';
 import { getLogger, Logger } from '../utils';
 import { DEFAULT_MODEL } from '../config/models';
 
@@ -68,6 +72,7 @@ export interface AgentManagerEvents {
   oneOffMessage: (oneOffId: string, message: AgentMessage) => void;
   oneOffStatus: (oneOffId: string, status: AgentStatus) => void;
   oneOffWaiting: (oneOffId: string, isWaiting: boolean, version: number) => void;
+  dockerFallbackWarning: (projectId: string, reason: string) => void;
 }
 
 export interface AgentResourceStatus {
@@ -91,6 +96,13 @@ export interface StartInteractiveAgentOptions {
   isNewSession?: boolean;
 }
 
+export interface StartAgentResult {
+  containerRestarted: boolean;
+  containerImageName?: string;
+  dockerFallback: boolean;
+  dockerFallbackReason?: string;
+}
+
 export interface FullAgentStatus {
   status: AgentStatus;
   mode: AgentMode | null;
@@ -104,7 +116,7 @@ export interface FullAgentStatus {
 
 export interface AgentManager {
   startAgent(projectId: string, instructions: string): Promise<void>;
-  startInteractiveAgent(projectId: string, options?: StartInteractiveAgentOptions): Promise<void>;
+  startInteractiveAgent(projectId: string, options?: StartInteractiveAgentOptions): Promise<StartAgentResult>;
   sendInput(projectId: string, input: string, images?: ImageData[]): void;
   sendToolResult(projectId: string, toolUseId: string, content: string): void;
   stopAgent(projectId: string): Promise<void>;
@@ -160,6 +172,8 @@ export interface AgentFactoryOptions {
   mcpServers?: McpServerConfig[];
   /** Enable Chrome browser usage */
   chromeEnabled?: boolean;
+  /** Custom process spawner (e.g., DockerProcessSpawner for sandboxed execution) */
+  processSpawner?: ProcessSpawner;
 }
 
 export interface AgentFactory {
@@ -178,6 +192,7 @@ export interface AgentManagerDependencies {
   roadmapParser: RoadmapParser;
   agentFactory?: AgentFactory;
   permissionGenerator?: PermissionGenerator;
+  containerManager?: ContainerManager;
   maxConcurrentAgents?: number;
 }
 
@@ -205,6 +220,7 @@ export class DefaultAgentManager implements AgentManager {
   private readonly roadmapParser: RoadmapParser;
   private readonly agentFactory: AgentFactory;
   private readonly permissionGenerator: PermissionGenerator;
+  private readonly containerManager: ContainerManager | null;
   private readonly logger: Logger;
   private readonly pendingMessageSaves: Set<Promise<unknown>> = new Set();
   private readonly listeners: EventListeners = {
@@ -220,6 +236,7 @@ export class DefaultAgentManager implements AgentManager {
     oneOffMessage: new Set(),
     oneOffStatus: new Set(),
     oneOffWaiting: new Set(),
+    dockerFallbackWarning: new Set(),
   };
   private waitingVersions: Map<string, number> = new Map();
   private oneOffWaitingVersions: Map<string, number> = new Map();
@@ -235,6 +252,7 @@ export class DefaultAgentManager implements AgentManager {
     roadmapParser,
     agentFactory = defaultAgentFactory,
     permissionGenerator,
+    containerManager,
     maxConcurrentAgents = 3,
   }: AgentManagerDependencies) {
     this.projectRepository = projectRepository;
@@ -244,6 +262,7 @@ export class DefaultAgentManager implements AgentManager {
     this.roadmapParser = roadmapParser;
     this.agentFactory = agentFactory;
     this.permissionGenerator = permissionGenerator || new DefaultPermissionGenerator();
+    this.containerManager = containerManager || null;
     this._maxConcurrentAgents = maxConcurrentAgents;
     this.logger = getLogger('agent-manager');
 
@@ -309,7 +328,7 @@ export class DefaultAgentManager implements AgentManager {
     await this.startAgentImmediately(projectId, instructions, 'autonomous');
   }
 
-  async startInteractiveAgent(projectId: string, options?: StartInteractiveAgentOptions): Promise<void> {
+  async startInteractiveAgent(projectId: string, options?: StartInteractiveAgentOptions): Promise<StartAgentResult> {
     if (this.agents.has(projectId)) {
       throw new Error('Agent is already running for this project');
     }
@@ -369,17 +388,32 @@ export class DefaultAgentManager implements AgentManager {
       permissionMode: effectiveMode,
     };
 
+    // Docker sandboxed execution (pass per-project image if set)
+    const dockerResult = await this.getDockerProcessSpawner(
+      projectId,
+      project.path,
+      project.dockerImage ?? undefined,
+    );
+
+    // If container was recreated and this is a resume, force new session
+    let effectiveSessionResult = sessionResult;
+    if (dockerResult.containerWasRecreated && !sessionResult.isNewSession) {
+      this.logger.warn('Container was recreated, forcing new session', { projectId });
+      effectiveSessionResult = await this.sessionManager.getOrCreateSession(projectId, undefined, true);
+    }
+
     // Create agent
     const agent = this.agentFactory.create({
       projectId,
       projectPath: project.path,
       mode: 'interactive',
       permissions: permissionConfig,
-      sessionId: sessionResult.sessionId,
-      isNewSession: sessionResult.isNewSession,
+      sessionId: effectiveSessionResult.sessionId,
+      isNewSession: effectiveSessionResult.isNewSession,
       model,
       mcpServers,
       chromeEnabled: settings.chromeEnabled ?? false,
+      processSpawner: dockerResult.processSpawner,
     });
 
     // Store agent
@@ -399,6 +433,13 @@ export class DefaultAgentManager implements AgentManager {
 
     // Start agent
     agent.start(initialInstructions || '');
+
+    return {
+      containerRestarted: dockerResult.containerWasRecreated,
+      containerImageName: dockerResult.containerImageName,
+      dockerFallback: dockerResult.dockerFallback,
+      dockerFallbackReason: dockerResult.dockerFallbackReason,
+    };
   }
 
   private buildMultimodalContent(text: string, images?: ImageData[]): string {
@@ -518,6 +559,10 @@ export class DefaultAgentManager implements AgentManager {
     this.loopOrchestrator.getRunningProjectIds().forEach((projectId) => {
       this.loopOrchestrator.stopLoop(projectId);
     });
+
+    if (this.containerManager) {
+      await this.containerManager.stopAllContainers();
+    }
   }
 
   getAgentStatus(projectId: string): AgentStatus {
@@ -833,6 +878,17 @@ export class DefaultAgentManager implements AgentManager {
 
     const model = await this.getModelForProject(options.projectId);
 
+    // Docker sandboxed execution
+    const dockerResult = await this.getDockerProcessSpawner(
+      options.projectId,
+      project.path,
+      project.dockerImage ?? undefined,
+    );
+
+    if (dockerResult.dockerFallback) {
+      this.emit('dockerFallbackWarning', options.projectId, dockerResult.dockerFallbackReason || 'Unknown error');
+    }
+
     const agent = this.agentFactory.create({
       projectId: options.projectId,
       projectPath: project.path,
@@ -840,6 +896,7 @@ export class DefaultAgentManager implements AgentManager {
       permissions: permissionConfig,
       model,
       chromeEnabled: settings.chromeEnabled ?? false,
+      processSpawner: dockerResult.processSpawner,
     });
 
     this.oneOffAgents.set(oneOffId, agent);
@@ -1039,6 +1096,17 @@ export class DefaultAgentManager implements AgentManager {
     // Apply per-project MCP overrides
     const mcpServers = this.applyMcpOverrides(globalMcpServers, project.mcpOverrides);
 
+    // Docker sandboxed execution
+    const dockerResult = await this.getDockerProcessSpawner(
+      projectId,
+      project.path,
+      project.dockerImage ?? undefined,
+    );
+
+    if (dockerResult.dockerFallback) {
+      this.emit('dockerFallbackWarning', projectId, dockerResult.dockerFallbackReason || 'Unknown error');
+    }
+
     const agent = this.agentFactory.create({
       projectId,
       projectPath: project.path,
@@ -1049,6 +1117,7 @@ export class DefaultAgentManager implements AgentManager {
       model,
       mcpServers,
       chromeEnabled: settings.chromeEnabled ?? false,
+      processSpawner: dockerResult.processSpawner,
     });
 
     this.agents.set(projectId, agent);
@@ -1464,6 +1533,53 @@ export class DefaultAgentManager implements AgentManager {
       const override = overrides.serverOverrides[server.id];
       return override?.enabled === true;
     });
+  }
+
+  private async shouldUseDocker(projectId: string): Promise<boolean> {
+    if (!this.containerManager) return false;
+
+    const settings = await this.settingsRepository.get();
+    if (!settings.docker?.enabled) return false;
+
+    // Check per-project override
+    const project = await this.projectRepository.findById(projectId);
+    if (project?.dockerOverride === false) return false;
+    if (project?.dockerOverride === true) return true;
+
+    return true;
+  }
+
+  private async getDockerProcessSpawner(
+    projectId: string,
+    projectPath: string,
+    imageName?: string,
+  ): Promise<{ processSpawner?: ProcessSpawner; containerWasRecreated: boolean; containerImageName?: string; dockerFallback: boolean; dockerFallbackReason?: string }> {
+    if (!await this.shouldUseDocker(projectId)) {
+      return { processSpawner: undefined, containerWasRecreated: false, dockerFallback: false };
+    }
+
+    try {
+      const result = await this.containerManager!.ensureContainer(projectId, projectPath, imageName);
+
+      const processSpawner = new DockerProcessSpawner(
+        { containerId: result.containerId, workDir: '/workspace' },
+        defaultSpawner,
+      );
+
+      return {
+        processSpawner,
+        containerWasRecreated: result.wasCreated || result.wasRestarted,
+        containerImageName: result.imageName,
+        dockerFallback: false,
+      };
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.logger.warn('Docker container creation failed, falling back to host execution', {
+        projectId,
+        error: reason,
+      });
+      return { processSpawner: undefined, containerWasRecreated: false, dockerFallback: true, dockerFallbackReason: reason };
+    }
   }
 
   private delay(ms: number): Promise<void> {

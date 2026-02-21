@@ -93,7 +93,7 @@
   function switchToTab(oneOffId) {
     state.activeOneOffTabId = oneOffId;
 
-    $('#conversation-container').addClass('hidden');
+    $('#conversation-wrapper').addClass('hidden');
     $('#oneoff-conversation-container').removeClass('hidden');
 
     // Hide main-only toolbar left section, inject one-off buttons
@@ -118,7 +118,7 @@
   function switchToMain() {
     state.activeOneOffTabId = null;
 
-    $('#conversation-container').removeClass('hidden');
+    $('#conversation-wrapper').removeClass('hidden');
     $('#oneoff-conversation-container').addClass('hidden');
 
     // Restore main toolbar left section, remove one-off buttons
@@ -506,7 +506,7 @@
       $('#oneoff-tab-bar').addClass('hidden');
     }
 
-    $('#conversation-container').removeClass('hidden');
+    $('#conversation-wrapper').removeClass('hidden');
     $('#conversation-toolbar').removeClass('hidden');
     $('#oneoff-conversation-container').addClass('hidden');
 

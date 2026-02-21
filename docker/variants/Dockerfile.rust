@@ -1,0 +1,11 @@
+FROM claudito-agent:latest
+
+USER root
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
+    && mv /root/.cargo /home/claudito/.cargo \
+    && mv /root/.rustup /home/claudito/.rustup \
+    && chown -R claudito:claudito /home/claudito/.cargo /home/claudito/.rustup
+
+USER claudito
+ENV PATH="/home/claudito/.cargo/bin:${PATH}"
+WORKDIR /workspace

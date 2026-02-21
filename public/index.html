@@ -260,6 +260,17 @@
             <span id="queued-count" class="text-yellow-400">0</span> queued
           </div>
         </div>
+        <div id="claude-cli-info" class="hidden mt-1 pt-1 border-t border-gray-700/50">
+          <div class="flex justify-between items-center gap-1">
+            <div class="truncate">
+              <span id="claude-cli-email" class="text-gray-400 truncate"></span>
+            </div>
+            <div class="flex items-center gap-1.5 shrink-0">
+              <span id="claude-cli-plan" class="text-purple-400 capitalize"></span>
+              <span id="claude-cli-version" class="text-gray-600"></span>
+            </div>
+          </div>
+        </div>
       </div>
     </aside>
 
@@ -303,12 +314,6 @@
               <span id="project-status" class="status-badge"></span>
             </div>
             <div class="flex items-center gap-1.5">
-              <button id="btn-view-roadmap" class="bg-gray-700 hover:bg-gray-600 text-white h-7 px-2.5 rounded flex items-center justify-center gap-1.5 text-sm transition-colors">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
-                </svg>
-                Roadmap
-              </button>
               <button id="btn-toggle-debug" class="bg-orange-700 hover:bg-orange-600 text-white h-7 px-2.5 rounded flex items-center justify-center gap-1.5 text-sm transition-colors hidden" title="Development Options">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
@@ -341,18 +346,18 @@
               </svg>
               <span class="text-xs md:text-sm">Git</span>
             </button>
-            <button id="tab-shell" class="tab-button py-2 px-4 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200 flex flex-col items-center md:flex-row md:justify-start">
-              <svg class="w-4 h-4 mb-1 md:mb-0 md:inline-block md:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
-              </svg>
-              <span class="text-xs md:text-sm">Shell</span>
-            </button>
             <button id="tab-run-configs" class="tab-button py-2 px-4 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200 flex flex-col items-center md:flex-row md:justify-start">
               <svg class="w-4 h-4 mb-1 md:mb-0 md:inline-block md:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
               </svg>
               <span class="text-xs md:text-sm">Run</span>
+            </button>
+            <button id="tab-shell" class="tab-button py-2 px-4 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200 flex flex-col items-center md:flex-row md:justify-start">
+              <svg class="w-4 h-4 mb-1 md:mb-0 md:inline-block md:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+              </svg>
+              <span class="text-xs md:text-sm">Shell</span>
             </button>
           </div>
 
@@ -373,16 +378,6 @@
                   </svg>
                   History
                 </button>
-                <button id="btn-optimizations-menu" class="bg-gray-700 hover:bg-gray-600 text-white py-1 px-2 rounded flex items-center gap-1 text-xs transition-colors relative" title="Optimizations menu">
-                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
-                  </svg>
-                  Optimizations
-                  <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-                  </svg>
-                  <span id="optimizations-menu-badge" class="hidden absolute -top-1 -right-1 bg-yellow-500 text-black text-xs rounded-full w-4 h-4 flex items-center justify-center font-bold">!</span>
-                </button>
                 <button id="btn-quick-actions" class="bg-gray-700 hover:bg-gray-600 text-white py-1 px-2 rounded flex items-center gap-1 text-xs transition-colors" title="Quick Actions - Run templates with one click">
                   <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
@@ -398,12 +393,6 @@
                   </svg>
                   Tasks
                   <span id="tasks-badge" class="hidden absolute -top-1 -right-1 bg-purple-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center font-medium">0</span>
-                </button>
-                <button id="btn-search" class="bg-gray-700 hover:bg-gray-600 text-white py-1 px-2 rounded flex items-center gap-1 text-xs transition-colors" title="Search conversation (Ctrl+F)">
-                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-                  </svg>
-                  Search
                 </button>
                 <button id="btn-project-mcp" class="bg-gray-700 hover:bg-gray-600 text-white py-1 px-2 rounded flex items-center gap-1 text-xs transition-colors hidden" title="Configure MCP servers for this project">
                   <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -427,11 +416,21 @@
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
                   </svg>
                 </button>
-                <button id="btn-ralph-loop" class="bg-teal-600 hover:bg-teal-700 text-white py-1 px-2 rounded flex items-center gap-1 text-xs transition-colors" title="Start Ralph Loop">
+                <button id="btn-optimizations-menu" class="bg-gray-700 hover:bg-gray-600 text-white py-1 px-2 rounded flex items-center gap-1 text-xs transition-colors relative" title="Special Actions menu">
                   <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
                   </svg>
-                  Ralph Loop
+                  Special Actions
+                  <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                  </svg>
+                  <span id="optimizations-menu-badge" class="hidden absolute -top-1 -right-1 bg-yellow-500 text-black text-xs rounded-full w-4 h-4 flex items-center justify-center font-bold">!</span>
+                </button>
+                <button id="btn-view-roadmap" class="bg-gray-700 hover:bg-gray-600 text-white py-1 px-2 rounded flex items-center gap-1 text-xs transition-colors" title="View Roadmap">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+                  </svg>
+                  Roadmap
                 </button>
                 <button id="btn-agent-mode" class="bg-purple-600 hover:bg-purple-700 text-white py-1 px-2 rounded flex items-center gap-1 text-xs transition-colors hidden" title="Switch to Agent Mode">
                   <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -464,6 +463,7 @@
                 <div id="model-selector" class="flex items-center bg-gray-700 rounded text-xs h-6" title="Select Claude model for this project">
                   <select id="project-model-select" class="bg-gray-700 text-white text-xs px-1.5 h-full rounded cursor-pointer focus:outline-none focus:ring-1 focus:ring-purple-500 appearance-none pr-5" style="background-image: url('data:image/svg+xml;charset=UTF-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%239ca3af%22 stroke-width=%222%22%3E%3Cpath stroke-linecap=%22round%22 stroke-linejoin=%22round%22 d=%22M19 9l-7 7-7-7%22/%3E%3C/svg%3E'); background-repeat: no-repeat; background-position: right 0.25rem center; background-size: 0.75rem;">
                     <option value="claude-opus-4-6" class="bg-gray-700 text-white">Opus 4.6</option>
+                    <option value="claude-sonnet-4-6" class="bg-gray-700 text-white">Sonnet 4.6</option>
                     <option value="claude-sonnet-4-5-20250929" class="bg-gray-700 text-white">Sonnet 4.5</option>
                     <option value="claude-haiku-4-5-20251001" class="bg-gray-700 text-white">Haiku 4.5</option>
                   </select>
@@ -505,6 +505,12 @@
                   Pause
                 </button>
                 <span id="pending-mode-label" class="text-xs text-yellow-400 hidden">(mode change pending)</span>
+                <button id="btn-search" class="bg-gray-700 hover:bg-gray-600 text-white py-1 px-2 rounded flex items-center gap-1 text-xs transition-colors" title="Search conversation (Ctrl+F)">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                  </svg>
+                  Search
+                </button>
                 <!-- Font Size Controls -->
                 <div class="flex items-center gap-1 border-r border-gray-600 pr-2">
                   <button id="btn-font-decrease" class="bg-gray-700 hover:bg-gray-600 text-white w-6 h-6 rounded flex items-center justify-center text-xs transition-colors" title="Decrease font size">
@@ -518,6 +524,17 @@
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
                     </svg>
                   </button>
+                </div>
+                <!-- Docker/Host Indicator with Image Selector -->
+                <div id="docker-host-indicator" class="hidden relative flex items-center text-xs">
+                  <button id="docker-indicator-btn" class="flex items-center gap-1 hover:opacity-80 transition-opacity cursor-pointer" title="Running on host machine">
+                    <svg id="docker-indicator-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                    </svg>
+                    <span id="docker-indicator-label" class="max-w-[100px] truncate"></span>
+                  </button>
+                  <div id="docker-image-dropdown" class="hidden absolute top-full left-0 mt-1 bg-gray-800 border border-gray-600 rounded-md shadow-lg z-50 min-w-[200px] max-h-48 overflow-y-auto">
+                  </div>
                 </div>
                 <!-- Search Controls -->
                 <div id="search-controls" class="flex items-center gap-1 border-r border-gray-600 pr-2 hidden">
@@ -561,17 +578,19 @@
             <div id="oneoff-tab-bar" class="hidden flex items-center bg-gray-800/50 border-b border-gray-700 overflow-x-auto shrink-0">
             </div>
 
-            <div id="conversation-container" class="flex-1 overflow-y-auto p-3 relative">
-              <div id="conversation" class="space-y-2 font-mono text-sm">
-                <!-- Conversation messages will be rendered here -->
+            <div id="conversation-wrapper" class="flex-1 relative overflow-hidden">
+              <div id="conversation-container" class="absolute inset-0 overflow-y-auto p-3">
+                <div id="conversation" class="space-y-2 font-mono text-sm">
+                  <!-- Conversation messages will be rendered here -->
+                </div>
               </div>
-              <!-- Floating scroll buttons -->
+              <!-- Floating scroll buttons (positioned over the scroll container) -->
               <button id="btn-scroll-top" class="scroll-float-btn scroll-float-btn-top hidden" title="Scroll to top">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/>
                 </svg>
               </button>
-              <button id="btn-scroll-bottom" class="scroll-float-btn scroll-float-btn-bottom hidden relative" title="Scroll to bottom">
+              <button id="btn-scroll-bottom" class="scroll-float-btn scroll-float-btn-bottom hidden" title="Scroll to bottom">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
                 </svg>
@@ -1263,6 +1282,18 @@
             </svg>
             MCP Servers
           </button>
+          <button type="button" class="settings-tab py-2 px-4 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200" data-tab="github">
+            <svg class="w-4 h-4 inline-block mr-1.5" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.438 9.8 8.205 11.387.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.73.083-.73 1.205.085 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.694.825.576C20.565 21.795 24 17.295 24 12c0-6.63-5.37-12-12-12z"/>
+            </svg>
+            GitHub
+          </button>
+          <button type="button" class="settings-tab py-2 px-4 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200" data-tab="docker">
+            <svg class="w-4 h-4 inline-block mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h2m2 0h2m2 0h2m2 0h2M3 8h18M5 4h14a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z"/>
+            </svg>
+            Docker
+          </button>
           <button type="button" class="settings-tab py-2 px-4 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200" data-tab="danger-zone">
             <svg class="w-4 h-4 inline-block mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
@@ -1311,12 +1342,6 @@
                 <button type="button" id="btn-settings-inventify-browse" class="bg-gray-600 hover:bg-gray-500 text-white px-2 py-1.5 rounded text-xs transition-colors">Browse</button>
               </div>
               <p class="text-xs text-gray-500 mt-1">Parent folder where Inventify creates new project directories</p>
-            </div>
-            <div class="border-t border-gray-700 pt-4 mt-4">
-              <label class="block text-xs font-medium text-gray-300 mb-2">GitHub Integration</label>
-              <div id="github-status-indicator" class="text-xs text-gray-400">
-                Checking...
-              </div>
             </div>
           </div>
 
@@ -1448,6 +1473,94 @@
             </div>
           </div>
 
+          <!-- GitHub Tab -->
+          <div id="settings-tab-github" class="settings-tab-content p-3 space-y-4 hidden">
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <label class="block text-xs font-medium text-gray-300">GitHub CLI Status</label>
+                <button type="button" id="btn-refresh-github-status" class="text-xs text-purple-400 hover:text-purple-300">Refresh</button>
+              </div>
+              <div id="github-status-indicator" class="text-xs text-gray-400">
+                Not checked yet
+              </div>
+            </div>
+          </div>
+
+          <!-- Docker Tab -->
+          <div id="settings-tab-docker" class="settings-tab-content p-3 space-y-4 hidden">
+            <!-- Docker Availability -->
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <label class="block text-xs font-medium text-gray-300">Docker Status</label>
+                <button type="button" id="btn-check-docker" class="text-xs text-purple-400 hover:text-purple-300">Refresh</button>
+              </div>
+              <div id="docker-availability-status" class="text-xs text-gray-400">Not checked yet</div>
+            </div>
+
+            <!-- Enable/Disable -->
+            <div>
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" id="input-docker-enabled" class="rounded bg-gray-700 border-gray-600 text-purple-500 focus:ring-purple-500">
+                <span class="text-sm text-gray-300">Enable Docker sandboxed execution</span>
+              </label>
+              <p class="text-xs text-gray-500 mt-1">When enabled, agents run inside Docker containers with the project directory mounted. Falls back to host execution if Docker is unavailable.</p>
+            </div>
+
+            <!-- Base Image -->
+            <div>
+              <label class="block text-xs font-medium text-gray-300 mb-1">Base Image</label>
+              <input type="text" id="input-docker-base-image" class="w-64 bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm focus:outline-none focus:border-purple-500" placeholder="claudito-agent:latest">
+              <p class="text-xs text-gray-500 mt-1">Docker image used for agent containers</p>
+            </div>
+
+            <!-- Resource Limits -->
+            <div>
+              <label class="block text-xs font-medium text-gray-300 mb-2">Resource Limits</label>
+              <div class="space-y-2 pl-4">
+                <div class="flex items-center gap-3">
+                  <label class="text-xs text-gray-400 w-20">CPU Cores</label>
+                  <input type="number" id="input-docker-cpus" min="0.5" max="16" step="0.5" class="w-24 bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm focus:outline-none focus:border-purple-500">
+                  <span class="text-xs text-gray-500">(0.5 - 16)</span>
+                </div>
+                <div class="flex items-center gap-3">
+                  <label class="text-xs text-gray-400 w-20">Memory (MB)</label>
+                  <input type="number" id="input-docker-memory" min="512" max="32768" step="256" class="w-24 bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm focus:outline-none focus:border-purple-500">
+                  <span class="text-xs text-gray-500">(512 - 32768)</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Network Mode -->
+            <div>
+              <label class="block text-xs font-medium text-gray-300 mb-1">Network Mode</label>
+              <select id="input-docker-network" class="w-48 bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm focus:outline-none focus:border-purple-500">
+                <option value="bridge">Bridge (default, outbound access)</option>
+                <option value="none">None (fully isolated)</option>
+              </select>
+              <p class="text-xs text-gray-500 mt-1">Bridge allows API access; None isolates the container completely.</p>
+            </div>
+
+            <!-- Image Management -->
+            <div class="border-t border-gray-700 pt-4">
+              <div class="flex items-center justify-between mb-2">
+                <label class="block text-xs font-medium text-gray-300">Docker Images</label>
+                <button type="button" id="btn-refresh-images" class="text-xs text-purple-400 hover:text-purple-300">Refresh</button>
+              </div>
+              <div id="docker-images-list" class="space-y-1.5 mb-3">
+                <div class="text-xs text-gray-500">Open Docker tab to load images</div>
+              </div>
+
+              <!-- Build from variant -->
+              <div class="flex items-center gap-2 mt-3">
+                <select id="docker-variant-select" class="flex-1 bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm focus:outline-none focus:border-purple-500">
+                  <option value="">Select variant...</option>
+                </select>
+                <button type="button" id="btn-build-image" class="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded text-sm transition-colors">Build</button>
+              </div>
+              <p class="text-xs text-gray-500 mt-1">Build a Docker image from a pre-configured variant</p>
+            </div>
+          </div>
+
           <!-- Danger Zone Tab -->
           <div id="settings-tab-danger-zone" class="settings-tab-content p-3 space-y-4 hidden">
             <div class="p-3 bg-red-900/20 border border-red-600/50 rounded">
@@ -1559,6 +1672,12 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
         </svg>
         Claude Files
+      </button>
+      <button id="btn-ralph-loop" class="w-full text-left px-3 py-2 text-xs text-gray-300 hover:bg-gray-700 rounded flex items-center gap-2">
+        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        Ralph Loop
       </button>
     </div>
   </div>
@@ -2633,6 +2752,7 @@
                 <label class="block text-xs font-medium text-gray-300 mb-1">Worker Model</label>
                 <select id="ralph-config-worker-model" class="w-full p-2 bg-gray-700 text-gray-200 rounded text-sm">
                   <option value="claude-opus-4-6" selected>Claude Opus 4.6</option>
+                  <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
                   <option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5</option>
                   <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
                 </select>
@@ -2642,7 +2762,8 @@
               <label class="block text-xs font-medium text-gray-300 mb-1">Reviewer Model</label>
               <select id="ralph-config-reviewer-model" class="w-full p-2 bg-gray-700 text-gray-200 rounded text-sm">
                 <option value="claude-opus-4-6">Claude Opus 4.6</option>
-                <option value="claude-sonnet-4-5-20250929" selected>Claude Sonnet 4.5</option>
+                <option value="claude-sonnet-4-6" selected>Claude Sonnet 4.6</option>
+                <option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5</option>
                 <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
               </select>
             </div>
@@ -3326,6 +3447,33 @@
     </div>
   </div>
 
+  <!-- Claude Auth Warning Modal -->
+  <div id="modal-claude-auth-warning" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <div class="bg-gray-800 rounded-lg shadow-xl w-full max-w-md">
+        <div class="p-3 border-b border-gray-700">
+          <h3 class="font-semibold text-yellow-400">Claude CLI Not Authenticated</h3>
+        </div>
+        <div class="p-4 space-y-3">
+          <p id="claude-auth-warning-message" class="text-sm text-gray-300">
+            You are not logged in to the Claude CLI. Claudito requires an authenticated Claude CLI session to function.
+          </p>
+          <div class="bg-gray-900 rounded p-3">
+            <p class="text-xs text-gray-400 mb-1">Run this command in your terminal:</p>
+            <code class="text-green-400 text-sm">claude auth login</code>
+          </div>
+          <p class="text-xs text-gray-500">After logging in, refresh this page.</p>
+        </div>
+        <div class="p-3 border-t border-gray-700 flex justify-end">
+          <button onclick="window.location.reload()" class="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded text-sm transition-colors">
+            Refresh Page
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast Container -->
   <div id="toast-container" class="fixed bottom-4 right-4 space-y-2 z-50"></div>
 
@@ -3369,6 +3517,8 @@
   <script src="/js/modules/claude-commands-module.js"></script>
   <script src="/js/modules/run-configs-module.js"></script>
   <script src="/js/modules/inventify-module.js"></script>
+  <script src="/js/modules/agent-controls-module.js"></script>
+  <script src="/js/modules/docker-module.js"></script>
   <!-- Main application -->
   <script src="/js/app.js"></script>
 </body>

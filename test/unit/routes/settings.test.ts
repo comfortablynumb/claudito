@@ -672,6 +672,89 @@ describe('SettingsRouter', () => {
     });
   });
 
+  describe('Docker validation', () => {
+    it('should accept valid Docker settings', async () => {
+      const response = await request(app)
+        .put('/settings')
+        .send({
+          docker: {
+            enabled: true,
+            baseImage: 'claudito-agent:latest',
+            resourceLimits: { cpus: 4, memoryMb: 8192 },
+            networkMode: 'bridge',
+          },
+        });
+
+      expect(response.status).toBe(200);
+    });
+
+    it('should accept partial Docker settings', async () => {
+      const response = await request(app)
+        .put('/settings')
+        .send({ docker: { enabled: true } });
+
+      expect(response.status).toBe(200);
+    });
+
+    it('should reject non-boolean enabled', async () => {
+      const response = await request(app)
+        .put('/settings')
+        .send({ docker: { enabled: 'yes' } });
+
+      expect(response.status).toBe(400);
+      const body = response.body as ErrorResponse;
+      expect(body.error).toContain('boolean');
+    });
+
+    it('should reject empty base image', async () => {
+      const response = await request(app)
+        .put('/settings')
+        .send({ docker: { baseImage: '' } });
+
+      expect(response.status).toBe(400);
+      const body = response.body as ErrorResponse;
+      expect(body.error).toContain('non-empty');
+    });
+
+    it('should reject invalid network mode', async () => {
+      const response = await request(app)
+        .put('/settings')
+        .send({ docker: { networkMode: 'host' } });
+
+      expect(response.status).toBe(400);
+      const body = response.body as ErrorResponse;
+      expect(body.error).toContain('bridge');
+    });
+
+    it('should reject negative CPU limit', async () => {
+      const response = await request(app)
+        .put('/settings')
+        .send({ docker: { resourceLimits: { cpus: -1 } } });
+
+      expect(response.status).toBe(400);
+      const body = response.body as ErrorResponse;
+      expect(body.error).toContain('positive');
+    });
+
+    it('should reject zero memory limit', async () => {
+      const response = await request(app)
+        .put('/settings')
+        .send({ docker: { resourceLimits: { memoryMb: 0 } } });
+
+      expect(response.status).toBe(400);
+      const body = response.body as ErrorResponse;
+      expect(body.error).toContain('positive');
+    });
+
+    it('should reject non-number CPU limit', async () => {
+      const response = await request(app)
+        .put('/settings')
+        .send({ docker: { resourceLimits: { cpus: 'fast' } } });
+
+      expect(response.status).toBe(400);
+    });
+  });
+
   describe('POST /settings/wipe-all-data', () => {
     it('should call dataWipeService.wipeAll and return summary', async () => {
       const response = await request(app).post('/settings/wipe-all-data');

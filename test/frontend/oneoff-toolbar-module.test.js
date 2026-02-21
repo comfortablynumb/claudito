@@ -277,12 +277,12 @@ describe('OneOffToolbarModule', () => {
       expect(global.$).toHaveBeenCalledWith('.oneoff-model-select');
     });
 
-    it('should default to opus when null', () => {
+    it('should default to sonnet when null', () => {
       OneOffToolbarModule.syncModel(null);
 
       expect(global.$).toHaveBeenCalledWith('.oneoff-model-select');
       const mockEl = global.$();
-      expect(mockEl.val).toHaveBeenCalledWith('claude-opus-4-6');
+      expect(mockEl.val).toHaveBeenCalledWith('claude-sonnet-4-6');
     });
   });
 

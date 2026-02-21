@@ -31,7 +31,7 @@ export function createRateLimiter(options: RateLimitOptions) {
 
   const store: RateLimitStore = {};
 
-  // Clean up expired entries periodically
+  // Clean up expired entries periodically (unref so it doesn't block process exit)
   setInterval(() => {
     const now = Date.now();
     Object.keys(store).forEach(key => {
@@ -39,7 +39,7 @@ export function createRateLimiter(options: RateLimitOptions) {
         delete store[key];
       }
     });
-  }, windowMs);
+  }, windowMs).unref();
 
   return (req: Request, res: Response, next: NextFunction): void => {
     // Use IP address as the key (consider using user ID for authenticated routes)

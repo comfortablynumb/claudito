@@ -11,3 +11,5 @@ export * from './data-wipe-service';
 export * from './run-config';
 export * from './inventify-types';
 export * from './inventify-service';
+export * from './docker';
+export * from './claude-cli-service';

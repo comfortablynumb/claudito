@@ -2025,5 +2025,71 @@
     });
   };
 
+  // =========================================================================
+  // Docker
+  // =========================================================================
+
+  ApiClient.getDockerAvailability = function() {
+    return $.get(baseUrl + '/api/docker/availability');
+  };
+
+  ApiClient.getDockerContainers = function() {
+    return $.get(baseUrl + '/api/docker/containers');
+  };
+
+  ApiClient.getProjectContainer = function(projectId) {
+    return $.get(baseUrl + '/api/docker/containers/' + projectId);
+  };
+
+  ApiClient.restartContainer = function(projectId) {
+    return $.ajax({
+      url: baseUrl + '/api/docker/containers/' + projectId + '/restart',
+      method: 'POST',
+    });
+  };
+
+  ApiClient.getDockerImages = function() {
+    return $.get(baseUrl + '/api/docker/images');
+  };
+
+  ApiClient.buildDockerImage = function(variantName, imageName) {
+    var data = { variantName: variantName };
+
+    if (imageName) {
+      data.imageName = imageName;
+    }
+
+    return $.ajax({
+      url: baseUrl + '/api/docker/images/build',
+      method: 'POST',
+      contentType: 'application/json',
+      data: JSON.stringify(data),
+    });
+  };
+
+  ApiClient.removeDockerImage = function(name) {
+    return $.ajax({
+      url: baseUrl + '/api/docker/images/' + encodeURIComponent(name),
+      method: 'DELETE',
+    });
+  };
+
+  ApiClient.getDockerVariants = function() {
+    return $.get(baseUrl + '/api/docker/variants');
+  };
+
+  ApiClient.getProjectDocker = function(projectId) {
+    return $.get(baseUrl + '/api/projects/' + projectId + '/docker');
+  };
+
+  ApiClient.setProjectDocker = function(projectId, body) {
+    return $.ajax({
+      url: baseUrl + '/api/projects/' + projectId + '/docker',
+      method: 'PUT',
+      contentType: 'application/json',
+      data: JSON.stringify(body),
+    });
+  };
+
   return ApiClient;
 });

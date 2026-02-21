@@ -23,6 +23,8 @@ global.$ = global.jQuery = function(selector) {
       // Query selector
       elements.push(...document.querySelectorAll(selector));
     }
+  } else if (Array.isArray(selector)) {
+    elements.push(...selector);
   } else if (selector instanceof Element || selector === document) {
     elements.push(selector);
   }
@@ -30,6 +32,8 @@ global.$ = global.jQuery = function(selector) {
   const $obj = {
     length: elements.length,
     elements: elements,
+    // Numeric indexing like real jQuery
+    ...Object.fromEntries(elements.map((el, i) => [i, el])),
 
     on: function(event, selectorOrHandler, handler) {
       const actualHandler = handler || selectorOrHandler;
@@ -130,6 +134,90 @@ global.$ = global.jQuery = function(selector) {
 
     hasClass: function(className) {
       return elements[0] ? elements[0].classList.contains(className) : false;
+    },
+
+    prop: function(name, value) {
+      if (value === undefined) {
+        return elements[0] ? elements[0][name] : undefined;
+      }
+      elements.forEach(el => { el[name] = value; });
+
+      return $obj;
+    },
+
+    attr: function(name, value) {
+      if (value === undefined) {
+        return elements[0] ? elements[0].getAttribute(name) : undefined;
+      }
+      elements.forEach(el => { el.setAttribute(name, value); });
+
+      return $obj;
+    },
+
+    html: function(value) {
+      if (value === undefined) {
+        return elements[0] ? elements[0].innerHTML : '';
+      }
+      elements.forEach(el => { el.innerHTML = value; });
+
+      return $obj;
+    },
+
+    append: function(content) {
+      elements.forEach(el => {
+        if (typeof content === 'string') {
+          el.insertAdjacentHTML('beforeend', content);
+        } else if (content instanceof Element) {
+          el.appendChild(content);
+        }
+      });
+
+      return $obj;
+    },
+
+    empty: function() {
+      elements.forEach(el => { el.innerHTML = ''; });
+
+      return $obj;
+    },
+
+    is: function(selector) {
+      if (selector === ':visible') {
+        return elements[0] ? !elements[0].classList.contains('hidden') : false;
+      }
+
+      return elements[0] ? elements[0].matches(selector) : false;
+    },
+
+    off: function() {
+      return $obj;
+    },
+
+    data: function(key, value) {
+      if (value === undefined) {
+        return elements[0] ? elements[0].dataset[key] : undefined;
+      }
+      elements.forEach(el => { el.dataset[key] = value; });
+
+      return $obj;
+    },
+
+    parent: function() {
+      const parents = [];
+      elements.forEach(el => {
+        if (el.parentNode) parents.push(el.parentNode);
+      });
+
+      return $(parents.length > 0 ? parents : { length: 0, elements: [] });
+    },
+
+    scrollTop: function(value) {
+      if (value === undefined) {
+        return elements[0] ? elements[0].scrollTop : 0;
+      }
+      elements.forEach(el => { el.scrollTop = value; });
+
+      return $obj;
     },
 
     find: function(selector) {

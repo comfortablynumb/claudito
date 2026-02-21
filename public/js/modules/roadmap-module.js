@@ -400,8 +400,10 @@
   function setupHandlers() {
     // Milestone header click - toggle expansion
     $(document).on('click', '.milestone-header', function(e) {
-      // Don't toggle if clicking on checkbox or button
-      if ($(e.target).is('input, button, svg, path')) return;
+      // Don't toggle if clicking on checkbox or delete button (but allow chevron clicks)
+      var $target = $(e.target);
+      if ($target.is('input, button')) return;
+      if ($target.is('svg, path') && !$target.closest('.milestone-chevron').length) return;
 
       var $header = $(this);
       var key = $header.data('milestone-key');
@@ -438,6 +440,17 @@
       $('.roadmap-select-milestone[data-phase-id="' + phaseId + '"]:not(:disabled)')
         .prop('checked', isChecked);
       $('.roadmap-select-task[data-phase-id="' + phaseId + '"]:not(:disabled)')
+        .prop('checked', isChecked);
+
+      updateRoadmapSelectionUI();
+    });
+
+    // Milestone checkbox cascades to tasks
+    $(document).on('change', '.roadmap-select-milestone', function() {
+      var isChecked = $(this).is(':checked');
+      var milestoneId = $(this).data('milestone-id');
+
+      $('.roadmap-select-task[data-milestone-id="' + milestoneId + '"]:not(:disabled)')
         .prop('checked', isChecked);
 
       updateRoadmapSelectionUI();
