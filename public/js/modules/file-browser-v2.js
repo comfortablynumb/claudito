@@ -270,6 +270,7 @@
       if (file.isMarkdown && file.previewMode) {
         renderMarkdownPreview(file);
       } else {
+        $('#code-editor-container').removeClass('hidden');
         $('#file-editor-textarea').removeClass('hidden').val(file.content);
         $('#markdown-preview-container').remove();
         updateFileModifiedState(file);
@@ -1264,8 +1265,8 @@
   }
 
   function renderMarkdownPreview(file) {
-    // Hide textarea
-    $('#file-editor-textarea').addClass('hidden');
+    // Hide code editor container (hides textarea and syntax highlight backdrop)
+    $('#code-editor-container').addClass('hidden');
 
     // Remove existing preview if any
     $('#markdown-preview-container').remove();
@@ -1283,8 +1284,8 @@
 
     previewHtml += '</div>';
 
-    // Insert preview after editor header
-    $('#file-editor-wrapper .editor-header').after(previewHtml);
+    // Insert preview after toolbar
+    $('#file-editor-toolbar').after(previewHtml);
   }
 
   function toggleMarkdownPreview(filePath) {

@@ -24,7 +24,7 @@ Environment Variables:
   HOST                  Server host
   NODE_ENV              Environment (development/production)
   LOG_LEVEL             Log level (debug/info/warn/error)
-  MAX_CONCURRENT_AGENTS Maximum concurrent agents (default: 3)
+  MAX_CONCURRENT_AGENTS Maximum concurrent agents (default: 5)
   DEV_MODE              Enable development mode (true/false)
   CLAUDITO_DEV_MODE     Enable development mode (1 to enable)
 

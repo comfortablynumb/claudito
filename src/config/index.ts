@@ -67,10 +67,10 @@ export class EnvironmentConfigLoader implements ConfigLoader {
 
   private parseMaxConcurrentAgents(): number {
     const maxStr = process.env['MAX_CONCURRENT_AGENTS'];
-    const max = maxStr ? parseInt(maxStr, 10) : 3;
+    const max = maxStr ? parseInt(maxStr, 10) : 5;
 
     if (isNaN(max) || max < 1) {
-      return 3;
+      return 5;
     }
 
     return max;

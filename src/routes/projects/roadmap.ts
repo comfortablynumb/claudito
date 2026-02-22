@@ -26,6 +26,23 @@ import {
   nextItemSchema
 } from './schemas';
 
+async function readRoadmap(projectPath: string): Promise<{ filePath: string; content: string }> {
+  const docPath = path.join(projectPath, 'doc', 'ROADMAP.md');
+  const rootPath = path.join(projectPath, 'ROADMAP.md');
+
+  try {
+    const content = await fs.promises.readFile(docPath, 'utf-8');
+    return { filePath: docPath, content };
+  } catch {
+    try {
+      const content = await fs.promises.readFile(rootPath, 'utf-8');
+      return { filePath: rootPath, content };
+    } catch {
+      throw new NotFoundError('Roadmap');
+    }
+  }
+}
+
 export function createRoadmapRouter(deps: ProjectRouterDependencies): Router {
   const router = Router({ mergeParams: true }); // mergeParams to access :id from parent
   const {
@@ -38,16 +55,9 @@ export function createRoadmapRouter(deps: ProjectRouterDependencies): Router {
   // Get roadmap
   router.get('/', validateProjectExists(projectRepository), asyncHandler(async (req: Request, res: Response) => {
     const project = req.project!;
-
-    const roadmapPath = path.join((project).path, 'doc', 'ROADMAP.md');
-
-    try {
-      const content = await fs.promises.readFile(roadmapPath, 'utf-8');
-      const parsed = roadmapParser.parse(content);
-      res.json({ content, parsed });
-    } catch {
-      throw new NotFoundError('Roadmap');
-    }
+    const { content } = await readRoadmap(project.path);
+    const parsed = roadmapParser.parse(content);
+    res.json({ content, parsed });
   }));
 
   // Generate roadmap
@@ -78,18 +88,10 @@ export function createRoadmapRouter(deps: ProjectRouterDependencies): Router {
     const body = req.body as RoadmapPromptBody;
     const { prompt } = body;
 
-    const roadmapPath = path.join((project).path, 'doc', 'ROADMAP.md');
+    // Read existing roadmap (with fallback to project root)
+    const { content: existingContent } = await readRoadmap(project.path);
 
-    // Read existing roadmap
-    let existingContent = '';
-
-    try {
-      existingContent = await fs.promises.readFile(roadmapPath, 'utf-8');
-    } catch {
-      throw new NotFoundError('Roadmap');
-    }
-
-    // Generate modified roadmap
+    // Generate modified roadmap (generator always saves to doc/ROADMAP.md)
     const result = await roadmapGenerator.generate({
       projectId: id,
       projectPath: (project).path,
@@ -101,8 +103,9 @@ export function createRoadmapRouter(deps: ProjectRouterDependencies): Router {
       throw new Error(result.error || 'Failed to modify roadmap');
     }
 
-    // Read and return the updated roadmap
-    const updatedContent = await fs.promises.readFile(roadmapPath, 'utf-8');
+    // Read and return the updated roadmap from where the generator saved it
+    const generatedPath = path.join(project.path, 'doc', 'ROADMAP.md');
+    const updatedContent = await fs.promises.readFile(generatedPath, 'utf-8');
     const parsed = roadmapParser.parse(updatedContent);
 
     res.json({ content: updatedContent, parsed });
@@ -114,15 +117,7 @@ export function createRoadmapRouter(deps: ProjectRouterDependencies): Router {
     const body = req.body as DeleteTaskBody;
     const { phaseId, milestoneId, taskIndex } = body;
 
-    const roadmapPath = path.join((project).path, 'doc', 'ROADMAP.md');
-
-    let content: string;
-
-    try {
-      content = await fs.promises.readFile(roadmapPath, 'utf-8');
-    } catch {
-      throw new NotFoundError('Roadmap');
-    }
+    const { filePath: roadmapPath, content } = await readRoadmap(project.path);
 
     const updatedContent = roadmapEditor.deleteTask(content, { phaseId: phaseId!, milestoneId: milestoneId!, taskIndex: taskIndex! });
     await fs.promises.writeFile(roadmapPath, updatedContent, 'utf-8');
@@ -137,15 +132,7 @@ export function createRoadmapRouter(deps: ProjectRouterDependencies): Router {
     const body = req.body as DeleteMilestoneBody;
     const { phaseId, milestoneId } = body;
 
-    const roadmapPath = path.join((project).path, 'doc', 'ROADMAP.md');
-
-    let content: string;
-
-    try {
-      content = await fs.promises.readFile(roadmapPath, 'utf-8');
-    } catch {
-      throw new NotFoundError('Roadmap');
-    }
+    const { filePath: roadmapPath, content } = await readRoadmap(project.path);
 
     const updatedContent = roadmapEditor.deleteMilestone(content, { phaseId: phaseId!, milestoneId: milestoneId! });
     await fs.promises.writeFile(roadmapPath, updatedContent, 'utf-8');
@@ -160,15 +147,7 @@ export function createRoadmapRouter(deps: ProjectRouterDependencies): Router {
     const body = req.body as DeletePhaseBody;
     const { phaseId } = body;
 
-    const roadmapPath = path.join((project).path, 'doc', 'ROADMAP.md');
-
-    let content: string;
-
-    try {
-      content = await fs.promises.readFile(roadmapPath, 'utf-8');
-    } catch {
-      throw new NotFoundError('Roadmap');
-    }
+    const { filePath: roadmapPath, content } = await readRoadmap(project.path);
 
     const updatedContent = roadmapEditor.deletePhase(content, { phaseId: phaseId! });
     await fs.promises.writeFile(roadmapPath, updatedContent, 'utf-8');
@@ -197,15 +176,7 @@ export function createRoadmapRouter(deps: ProjectRouterDependencies): Router {
     const body = req.body as AddTaskBody;
     const { phaseId, milestoneId, taskTitle } = body;
 
-    const roadmapPath = path.join((project).path, 'doc', 'ROADMAP.md');
-
-    let content: string;
-
-    try {
-      content = await fs.promises.readFile(roadmapPath, 'utf-8');
-    } catch {
-      throw new NotFoundError('Roadmap');
-    }
+    const { filePath: roadmapPath, content } = await readRoadmap(project.path);
 
     const updatedContent = roadmapEditor.addTask(content, {
       phaseId: phaseId!,

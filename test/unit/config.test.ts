@@ -29,7 +29,7 @@ describe('EnvironmentConfigLoader', () => {
         host: '0.0.0.0',
         env: 'development',
         logLevel: 'info',
-        maxConcurrentAgents: 3,
+        maxConcurrentAgents: 5,
         devMode: false,
         shellEnabled: false,
         shellForceEnabled: false,
@@ -51,7 +51,7 @@ describe('EnvironmentConfigLoader', () => {
       const loader = new EnvironmentConfigLoader();
       const config = loader.load();
 
-      expect(config.maxConcurrentAgents).toBe(3);
+      expect(config.maxConcurrentAgents).toBe(5);
     });
 
     it('should parse PORT from env', () => {

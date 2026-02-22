@@ -28,7 +28,7 @@ import {
 import { InstructionGenerator, RoadmapParser } from '../services';
 import { ContainerManager } from '../services/docker/types';
 import { DockerProcessSpawner } from '../services/docker/docker-process-spawner';
-import { getLogger, Logger } from '../utils';
+import { getLogger, Logger, ConflictError } from '../utils';
 import { DEFAULT_MODEL } from '../config/models';
 
 // Import new modules
@@ -253,7 +253,7 @@ export class DefaultAgentManager implements AgentManager {
     agentFactory = defaultAgentFactory,
     permissionGenerator,
     containerManager,
-    maxConcurrentAgents = 3,
+    maxConcurrentAgents = 5,
   }: AgentManagerDependencies) {
     this.projectRepository = projectRepository;
     this.conversationRepository = conversationRepository;
@@ -335,6 +335,10 @@ export class DefaultAgentManager implements AgentManager {
 
     if (this.agentQueue.isQueued(projectId)) {
       throw new Error('Agent is already queued for this project');
+    }
+
+    if (this.agents.size >= this.maxConcurrentAgents) {
+      throw new ConflictError(`Maximum concurrent agents limit (${this.maxConcurrentAgents}) reached. Stop an existing agent to start a new one.`);
     }
 
     const project = await this.projectRepository.findById(projectId);

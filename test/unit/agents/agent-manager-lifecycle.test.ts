@@ -38,6 +38,14 @@ jest.mock('../../../src/utils', () => ({
     }),
   }),
   isValidUUID: jest.fn((str) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str)),
+  ConflictError: class ConflictError extends Error {
+    statusCode = 409;
+    code = 'CONFLICT';
+    constructor(message: string) {
+      super(message);
+      this.name = 'ConflictError';
+    }
+  },
 }));
 
 // Mock permission generator
@@ -691,6 +699,33 @@ describe('AgentManager Lifecycle Tests', () => {
 
       agentManager.setMaxConcurrentAgents(5);
       expect(agentManager.getResourceStatus().maxConcurrent).toBe(5);
+    });
+
+    it('should throw ConflictError when starting interactive agent at concurrent limit', async () => {
+      // Fill the concurrent limit with autonomous agents
+      await agentManager.startAgent(projectId1, 'instructions 1');
+      await agentManager.startAgent(projectId2, 'instructions 2');
+
+      expect(agentManager.getResourceStatus().runningCount).toBe(2);
+
+      // Interactive agent on a third project should throw, not queue
+      await expect(
+        agentManager.startInteractiveAgent(projectId3, { initialMessage: 'hello' })
+      ).rejects.toThrow('limit');
+
+      expect(agentManager.isQueued(projectId3)).toBe(false);
+      expect(agentManager.getResourceStatus().runningCount).toBe(2);
+      expect(agentManager.getResourceStatus().queuedCount).toBe(0);
+    });
+
+    it('should start interactive agent immediately when under concurrent limit', async () => {
+      // Only one running agent — limit is 2
+      await agentManager.startAgent(projectId1, 'instructions 1');
+
+      await agentManager.startInteractiveAgent(projectId2, { initialMessage: 'hello' });
+
+      expect(agentManager.isQueued(projectId2)).toBe(false);
+      expect(agentManager.getResourceStatus().runningCount).toBe(2);
     });
   });
 

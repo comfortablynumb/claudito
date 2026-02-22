@@ -3296,7 +3296,11 @@
         updateCancelButton();
       })
       .fail(function(xhr) {
-        showErrorToast(xhr, 'Failed to start agent');
+        if (xhr.status === 409 && xhr.responseJSON && xhr.responseJSON.code === 'CONFLICT' && xhr.responseJSON.error && xhr.responseJSON.error.includes('limit')) {
+          showToast(xhr.responseJSON.error, 'warning');
+        } else {
+          showErrorToast(xhr, 'Failed to start agent');
+        }
       })
       .always(function() {
         state.agentStarting = false;
@@ -4244,8 +4248,12 @@
         updateInputArea();
       })
       .fail(function(xhr) {
-        showErrorToast(xhr, 'Failed to start agent');
-        })
+        if (xhr.status === 409 && xhr.responseJSON && xhr.responseJSON.code === 'CONFLICT' && xhr.responseJSON.error && xhr.responseJSON.error.includes('limit')) {
+          showToast(xhr.responseJSON.error, 'warning');
+        } else {
+          showErrorToast(xhr, 'Failed to start agent');
+        }
+      })
       .always(function() {
         state.agentStarting = false;
         setQuickActionLoading(projectId, false);
