@@ -974,6 +974,7 @@ import {
   QueuedProject,
   FullAgentStatus,
   StartAgentResult,
+  ActiveOneOffAgent,
 } from '../../../src/agents/agent-manager';
 
 export function createMockAgentManager(): jest.Mocked<AgentManager> {
@@ -1077,6 +1078,7 @@ export function createMockAgentManager(): jest.Mocked<AgentManager> {
     getOneOffContextUsage: jest.fn().mockReturnValue(null),
     isOneOffWaitingForInput: jest.fn().mockReturnValue(false),
     getOneOffCollectedOutput: jest.fn().mockReturnValue(null),
+    getActiveOneOffAgents: jest.fn().mockReturnValue([] as ActiveOneOffAgent[]),
     on: jest.fn().mockImplementation(<K extends keyof AgentManagerEvents>(
       event: K,
       listener: AgentManagerEvents[K]

@@ -102,17 +102,20 @@ export interface FrontendErrorData {
 
 export interface OneOffMessageData extends AgentMessage {
   oneOffId: string;
+  label?: string;
 }
 
 export interface OneOffStatusData {
   oneOffId: string;
   status: string;
+  label?: string;
 }
 
 export interface OneOffWaitingData {
   oneOffId: string;
   isWaiting: boolean;
   version: number;
+  label?: string;
 }
 
 export interface GitHubCloneProgressData {
@@ -784,7 +787,7 @@ export class DefaultWebSocketServer implements ProjectWebSocketServer {
       this.broadcastToProject(meta.projectId, {
         type: 'oneoff_message',
         projectId: meta.projectId,
-        data: { ...message, oneOffId },
+        data: { ...message, oneOffId, label: meta.label },
       });
     });
 
@@ -796,7 +799,7 @@ export class DefaultWebSocketServer implements ProjectWebSocketServer {
       this.broadcastToProject(meta.projectId, {
         type: 'oneoff_status',
         projectId: meta.projectId,
-        data: { oneOffId, status },
+        data: { oneOffId, status, label: meta.label },
       });
     });
 
@@ -808,7 +811,7 @@ export class DefaultWebSocketServer implements ProjectWebSocketServer {
       this.broadcastToProject(meta.projectId, {
         type: 'oneoff_waiting',
         projectId: meta.projectId,
-        data: { oneOffId, isWaiting, version },
+        data: { oneOffId, isWaiting, version, label: meta.label },
       });
     });
   }

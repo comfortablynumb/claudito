@@ -52,6 +52,13 @@ export interface OneOffAgentOptions {
   message: string;
   permissionMode?: 'acceptEdits' | 'plan';
   label?: string;
+  appendSystemPrompt?: string;
+}
+
+export interface ActiveOneOffAgent {
+  oneOffId: string;
+  label: string;
+  status: AgentStatus;
 }
 
 export interface OneOffMeta {
@@ -162,6 +169,7 @@ export interface AgentManager {
   getOneOffContextUsage(oneOffId: string): ContextUsage | null;
   isOneOffWaitingForInput(oneOffId: string): boolean;
   getOneOffCollectedOutput(oneOffId: string): string | null;
+  getActiveOneOffAgents(projectId: string): ActiveOneOffAgent[];
   on<K extends keyof AgentManagerEvents>(event: K, listener: AgentManagerEvents[K]): void;
   off<K extends keyof AgentManagerEvents>(event: K, listener: AgentManagerEvents[K]): void;
 }
@@ -929,6 +937,7 @@ export class DefaultAgentManager implements AgentManager {
       allowedTools: shouldSkipOneOff ? [] : permArgs.allowedTools,
       disallowedTools: shouldSkipOneOff ? [] : permArgs.disallowedTools,
       permissionMode: effectiveOneOffMode,
+      appendSystemPrompt: options.appendSystemPrompt || settings.appendSystemPrompt,
     };
 
     const model = await this.getModelForProject(options.projectId);
@@ -1025,6 +1034,18 @@ export class DefaultAgentManager implements AgentManager {
   getOneOffCollectedOutput(oneOffId: string): string | null {
     const agent = this.oneOffAgents.get(oneOffId);
     return agent ? agent.collectedOutput : null;
+  }
+
+  getActiveOneOffAgents(projectId: string): ActiveOneOffAgent[] {
+    const result: ActiveOneOffAgent[] = [];
+
+    for (const [oneOffId, meta] of this.oneOffMeta.entries()) {
+      if (meta.projectId !== projectId) continue;
+      const agent = this.oneOffAgents.get(oneOffId);
+      result.push({ oneOffId, label: meta.label, status: agent ? agent.status : 'stopped' });
+    }
+
+    return result;
   }
 
   private setupOneOffAgentListeners(oneOffId: string, agent: ClaudeAgent): void {

@@ -523,6 +523,15 @@
   };
 
   /**
+   * Get all active one-off agents for a project
+   * @param {string} projectId - Project UUID
+   * @returns {Promise<{agents: Array<{oneOffId: string, label: string, status: string}>}>}
+   */
+  ApiClient.getActiveOneOffAgents = function(projectId) {
+    return $.get(baseUrl + '/api/projects/' + projectId + '/agent/oneoff');
+  };
+
+  /**
    * Answer an AskUserQuestion from the agent
    * @param {string} projectId - Project UUID
    * @param {string} toolUseId - The tool_use_id for the AskUserQuestion

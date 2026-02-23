@@ -48,6 +48,47 @@ describe('DefaultSlackThreadTracker', () => {
   });
 });
 
+describe('DefaultSlackThreadTracker registerOneOff / findOneOffId', () => {
+  it('returns oneOffId after registering', () => {
+    const tracker = new DefaultSlackThreadTracker();
+    tracker.registerOneOff('C_CHANNEL', 'ts-123', 'oneoff-abc');
+
+    expect(tracker.findOneOffId('C_CHANNEL', 'ts-123')).toBe('oneoff-abc');
+  });
+
+  it('returns null for unknown thread', () => {
+    const tracker = new DefaultSlackThreadTracker();
+
+    expect(tracker.findOneOffId('C_CHANNEL', 'unknown-ts')).toBeNull();
+  });
+
+  it('latest registration wins for same channel+threadTs key', () => {
+    const tracker = new DefaultSlackThreadTracker();
+    tracker.registerOneOff('C_CHANNEL', 'ts-123', 'oneoff-first');
+    tracker.registerOneOff('C_CHANNEL', 'ts-123', 'oneoff-second');
+
+    expect(tracker.findOneOffId('C_CHANNEL', 'ts-123')).toBe('oneoff-second');
+  });
+
+  it('different channels with same threadTs are independent', () => {
+    const tracker = new DefaultSlackThreadTracker();
+    tracker.registerOneOff('C_A', 'ts-same', 'oneoff-a');
+    tracker.registerOneOff('C_B', 'ts-same', 'oneoff-b');
+
+    expect(tracker.findOneOffId('C_A', 'ts-same')).toBe('oneoff-a');
+    expect(tracker.findOneOffId('C_B', 'ts-same')).toBe('oneoff-b');
+  });
+
+  it('oneOff map is independent from project map', () => {
+    const tracker = new DefaultSlackThreadTracker();
+    tracker.register('proj-1', 'C_CHANNEL', 'ts-123');
+    tracker.registerOneOff('C_CHANNEL', 'ts-123', 'oneoff-abc');
+
+    expect(tracker.find('C_CHANNEL', 'ts-123')).toBe('proj-1');
+    expect(tracker.findOneOffId('C_CHANNEL', 'ts-123')).toBe('oneoff-abc');
+  });
+});
+
 describe('DefaultSlackThreadTracker setLatest / getLatest', () => {
   it('returns latest thread after setLatest', () => {
     const tracker = new DefaultSlackThreadTracker();

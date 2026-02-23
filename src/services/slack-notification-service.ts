@@ -6,10 +6,7 @@ import { SettingsRepository } from '../repositories/settings';
 import { ProjectRepository, SlackNotificationConfig, SlackNotificationEvent } from '../repositories/project';
 import { WaitingStatus, AgentStatus } from '../agents/claude-agent';
 import { MilestoneRef } from '../agents/autonomous-loop-orchestrator';
-import { AgentMessage } from '../agents/types';
 import { getLogger, Logger } from '../utils';
-
-const MAX_SLACK_MESSAGE_LENGTH = 39000;
 
 // ============================================================================
 // Types
@@ -132,21 +129,17 @@ export class DefaultSlackNotificationService implements SlackNotificationService
   private readonly boundMilestoneFailedHandler: (projectId: string, milestone: MilestoneRef | null, reason: string) => void;
   private readonly boundLoopCompleteHandler: (projectId: string, taskId: string, finalStatus: RalphLoopFinalStatus) => void;
   private readonly boundLoopErrorHandler: (projectId: string, taskId: string, error: string) => void;
-  private readonly boundMessageHandler: (projectId: string, message: AgentMessage) => void;
-  private readonly pendingSlackReplies: Map<string, string[]> = new Map();
-  private readonly pendingWorkingMessages: Map<string, { channelId: string; messageTs: string }> = new Map();
 
   constructor(deps: SlackNotificationServiceDeps) {
     this.deps = deps;
     this.logger = getLogger('slack-notifications');
 
-    this.boundStatusHandler = (p, s) => void this.handleStatusChange(p, s);
-    this.boundWaitingHandler = (p, w) => void this.handleWaiting(p, w);
-    this.boundMilestoneCompletedHandler = (p, m, r) => void this.handleMilestoneCompleted(p, m, r);
-    this.boundMilestoneFailedHandler = (p, m, r) => void this.handleMilestoneFailed(p, m, r);
-    this.boundLoopCompleteHandler = (p, t, f) => void this.handleLoopComplete(p, t, f);
-    this.boundLoopErrorHandler = (p, t, e) => void this.handleLoopError(p, t, e);
-    this.boundMessageHandler = (p, m) => void this.handleAgentMessage(p, m);
+    this.boundStatusHandler = (p, s): void => void this.handleStatusChange(p, s);
+    this.boundWaitingHandler = (p, w): void => void this.handleWaiting(p, w);
+    this.boundMilestoneCompletedHandler = (p, m, r): void => void this.handleMilestoneCompleted(p, m, r);
+    this.boundMilestoneFailedHandler = (p, m, r): void => void this.handleMilestoneFailed(p, m, r);
+    this.boundLoopCompleteHandler = (p, t, f): void => void this.handleLoopComplete(p, t, f);
+    this.boundLoopErrorHandler = (p, t, e): void => void this.handleLoopError(p, t, e);
   }
 
   start(): void {
@@ -155,7 +148,6 @@ export class DefaultSlackNotificationService implements SlackNotificationService
     agentManager.on('waitingForInput', this.boundWaitingHandler);
     agentManager.on('milestoneCompleted', this.boundMilestoneCompletedHandler);
     agentManager.on('milestoneFailed', this.boundMilestoneFailedHandler);
-    agentManager.on('message', this.boundMessageHandler);
 
     if (ralphLoopService) {
       ralphLoopService.on('loop_complete', this.boundLoopCompleteHandler);
@@ -171,7 +163,6 @@ export class DefaultSlackNotificationService implements SlackNotificationService
     agentManager.off('waitingForInput', this.boundWaitingHandler);
     agentManager.off('milestoneCompleted', this.boundMilestoneCompletedHandler);
     agentManager.off('milestoneFailed', this.boundMilestoneFailedHandler);
-    agentManager.off('message', this.boundMessageHandler);
 
     if (ralphLoopService) {
       ralphLoopService.off('loop_complete', this.boundLoopCompleteHandler);
@@ -179,104 +170,6 @@ export class DefaultSlackNotificationService implements SlackNotificationService
     }
 
     this.logger.info('Slack notification service stopped');
-  }
-
-  private async handleAgentMessage(projectId: string, message: AgentMessage): Promise<void> {
-    if (message.type === 'user' && message.source === 'slack') {
-      await this.postWorkingMessage(projectId);
-      return;
-    }
-
-    if (message.type === 'plan_mode' && message.planModeInfo?.action === 'exit') {
-      const planContent = message.planModeInfo.planContent ?? '';
-      this.pendingSlackReplies.set(projectId, planContent ? [planContent] : []);
-      return;
-    }
-
-    if (message.type !== 'stdout' || !message.content) return;
-
-    const lines = this.pendingSlackReplies.get(projectId) ?? [];
-    lines.push(message.content);
-    this.pendingSlackReplies.set(projectId, lines);
-  }
-
-  private async postWorkingMessage(projectId: string): Promise<void> {
-    if (this.pendingWorkingMessages.has(projectId)) return;
-    // Reserve slot immediately to prevent concurrent calls before async work completes
-    this.pendingWorkingMessages.set(projectId, { channelId: '', messageTs: '' });
-
-    const botToken = await this.getBotToken();
-    if (!botToken) {
-      this.pendingWorkingMessages.delete(projectId);
-      return;
-    }
-
-    const latest = this.deps.threadTracker?.getLatest(projectId);
-    if (!latest) {
-      this.pendingWorkingMessages.delete(projectId);
-      return;
-    }
-
-    const text = '⏳ Working on it...';
-    const ts = await this.deps.slackService.replyInThread(
-      botToken, latest.channelId, latest.threadTs, text, [buildSection(text)]
-    );
-
-    if (ts) {
-      this.pendingWorkingMessages.set(projectId, { channelId: latest.channelId, messageTs: ts });
-    } else {
-      this.pendingWorkingMessages.delete(projectId);
-    }
-  }
-
-  private async sendPendingSlackReply(projectId: string): Promise<void> {
-    const lines = this.pendingSlackReplies.get(projectId);
-    this.pendingSlackReplies.delete(projectId);
-
-    if (!lines || lines.length === 0) {
-      this.pendingWorkingMessages.delete(projectId);
-      return;
-    }
-
-    const botToken = await this.getBotToken();
-    if (!botToken) return;
-
-    try {
-      const project = await this.deps.projectRepository.findById(projectId);
-      if (!project?.slackLinkedChannelId) return;
-
-      let text = lines.join('\n').trim();
-
-      if (!text) {
-        this.pendingWorkingMessages.delete(projectId);
-        return;
-      }
-
-      if (text.length > MAX_SLACK_MESSAGE_LENGTH) {
-        text = text.slice(0, MAX_SLACK_MESSAGE_LENGTH) + '\n…(truncated)';
-      }
-
-      const mrkdwn = convertMarkdownToMrkdwn(text);
-      const blocks = buildMrkdwnBlocks(mrkdwn);
-      const latest = this.deps.threadTracker?.getLatest(projectId);
-      const working = this.pendingWorkingMessages.get(projectId);
-      this.pendingWorkingMessages.delete(projectId);
-
-      if (working && working.messageTs) {
-        await this.deps.slackService.updateMessage(botToken, working.channelId, working.messageTs, text, blocks);
-      } else if (latest && latest.channelId === project.slackLinkedChannelId) {
-        await this.deps.slackService.replyInThread(botToken, latest.channelId, latest.threadTs, text, blocks);
-      } else {
-        await this.deps.slackService.sendMessage(botToken, project.slackLinkedChannelId, text, blocks);
-      }
-
-      this.logger.info('Pending Slack reply sent', { projectId, length: text.length });
-    } catch (err) {
-      this.logger.error('Failed to send pending Slack reply', {
-        projectId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
   }
 
   private async handleStatusChange(projectId: string, status: AgentStatus): Promise<void> {
@@ -299,7 +192,6 @@ export class DefaultSlackNotificationService implements SlackNotificationService
     const detail = startTime ? buildDurationDetail(startTime) : undefined;
     this.logger.info('Dispatching agent notification', { projectId, event });
 
-    await this.sendPendingSlackReply(projectId);
     await this.sendProjectNotification({ projectId, event, detail });
     await this.sendLinkedChannelSummary({ projectId, event, startTime });
   }
@@ -307,7 +199,6 @@ export class DefaultSlackNotificationService implements SlackNotificationService
   private async handleWaiting(projectId: string, status: WaitingStatus): Promise<void> {
     if (!status.isWaiting) return;
     this.logger.info('Agent waiting, dispatching notification', { projectId });
-    await this.sendPendingSlackReply(projectId);
     await this.sendProjectNotification({ projectId, event: 'agent_waiting' });
   }
 
@@ -451,13 +342,9 @@ export class DefaultSlackNotificationService implements SlackNotificationService
       }
 
       const latest = this.deps.threadTracker?.getLatest(opts.projectId);
+      if (!latest) return;
 
-      if (latest && latest.channelId === project.slackLinkedChannelId) {
-        await this.deps.slackService.replyInThread(botToken, latest.channelId, latest.threadTs, text);
-      } else {
-        await this.deps.slackService.sendMessage(botToken, project.slackLinkedChannelId, text);
-      }
-
+      await this.deps.slackService.replyInThread(botToken, latest.channelId, latest.threadTs, text);
       this.logger.info('Linked channel summary sent', { projectId: opts.projectId });
     } catch (err) {
       this.logger.error('Failed to send linked channel summary', {
@@ -475,10 +362,13 @@ export class DefaultSlackNotificationService implements SlackNotificationService
       const project = await this.deps.projectRepository.findById(opts.projectId);
       if (!project?.slackLinkedChannelId) return;
 
+      const latest = this.deps.threadTracker?.getLatest(opts.projectId);
+      if (!latest) return;
+
       const emoji = eventEmoji(opts.event);
       const text = `${emoji} *${project.name}* — Milestone completed: ${opts.milestone.milestoneId}`;
 
-      await this.deps.slackService.sendMessage(botToken, project.slackLinkedChannelId, text);
+      await this.deps.slackService.replyInThread(botToken, latest.channelId, latest.threadTs, text);
       this.logger.info('Linked channel milestone sent', { projectId: opts.projectId });
     } catch (err) {
       this.logger.error('Failed to send linked channel milestone update', {

@@ -1,5 +1,5 @@
 import { DefaultSlackCommandService, SlackCommandServiceDeps } from '../../../src/services/slack-command-service';
-import { SlackSocketService, SlashCommandBody, SlackMessageEvent } from '../../../src/services/slack-service';
+import { SlackSocketService, SlashCommandBody, SlackMessageEvent, InteractiveActionBody } from '../../../src/services/slack-service';
 import { SlackThreadTracker } from '../../../src/services/slack-thread-tracker';
 import { ProjectStatus } from '../../../src/repositories/project';
 import {
@@ -10,6 +10,7 @@ import {
   sampleProject,
 } from '../helpers/mock-factories';
 import { AgentManager } from '../../../src/agents/agent-manager';
+import { AgentStatus } from '../../../src/agents/types';
 import { ProjectRepository } from '../../../src/repositories/project';
 import { SettingsRepository } from '../../../src/repositories/settings';
 import { SlackService } from '../../../src/services/slack-service';
@@ -35,6 +36,8 @@ function createMockTracker(): jest.Mocked<SlackThreadTracker> {
     find: jest.fn().mockReturnValue(null),
     setLatest: jest.fn(),
     getLatest: jest.fn().mockReturnValue(null),
+    registerOneOff: jest.fn(),
+    findOneOffId: jest.fn().mockReturnValue(null),
   };
 }
 
@@ -44,6 +47,8 @@ interface SetupOpts {
   linkedChannelId?: string;
   agentRunning?: boolean;
   trackerProjectId?: string | null;
+  trackerOneOffId?: string | null;
+  projects?: ProjectStatus[];
 }
 
 interface TestSetup {
@@ -56,6 +61,7 @@ interface TestSetup {
     threadTracker: jest.Mocked<SlackThreadTracker>;
   };
   getMessageHandler(): (event: SlackMessageEvent, ack: () => Promise<void>) => Promise<void>;
+  getInteractiveHandler(): (body: InteractiveActionBody, ack: () => Promise<void>) => Promise<void>;
 }
 
 function createSetup(opts: SetupOpts = {}): TestSetup {
@@ -65,8 +71,13 @@ function createSetup(opts: SetupOpts = {}): TestSetup {
 
   const socketService = createMockSocketService();
 
-  const project = { ...sampleProject, slackLinkedChannelId: opts.linkedChannelId };
-  const projectRepository = createMockProjectRepository([project]);
+  const projectList = opts.projects ?? [
+    {
+      ...sampleProject,
+      ...(opts.linkedChannelId && { slackLinkedChannelId: opts.linkedChannelId }),
+    },
+  ];
+  const projectRepository = createMockProjectRepository(projectList);
   const settingsRepository = createMockSettingsRepository({
     slack: { enabled: true, botToken: 'xoxb-test', appToken: '', defaultChannelId: '' },
   });
@@ -80,6 +91,10 @@ function createSetup(opts: SetupOpts = {}): TestSetup {
     threadTracker.find.mockReturnValue(opts.trackerProjectId);
   }
 
+  if (opts.trackerOneOffId !== undefined) {
+    threadTracker.findOneOffId.mockReturnValue(opts.trackerOneOffId);
+  }
+
   const deps: TestSetup['deps'] = {
     agentManager,
     slackService,
@@ -89,7 +104,7 @@ function createSetup(opts: SetupOpts = {}): TestSetup {
     threadTracker,
   };
 
-  function getMessageHandler() {
+  function buildService() {
     const service = new DefaultSlackCommandService({
       agentManager,
       slackService,
@@ -99,93 +114,167 @@ function createSetup(opts: SetupOpts = {}): TestSetup {
       threadTracker,
     } as SlackCommandServiceDeps);
     service.register();
+    return service;
+  }
+
+  function getMessageHandler() {
+    buildService();
     return (socketService.onMessageEvent as jest.Mock).mock.calls[0][0] as
       (event: SlackMessageEvent, ack: () => Promise<void>) => Promise<void>;
   }
 
-  return { deps, getMessageHandler };
+  function getInteractiveHandler() {
+    buildService();
+    return (socketService.onInteractiveAction as jest.Mock).mock.calls[0][0] as
+      (body: InteractiveActionBody, ack: () => Promise<void>) => Promise<void>;
+  }
+
+  return { deps, getMessageHandler, getInteractiveHandler };
 }
 
 // ============================================================================
-// Tests: top-level messages
+// Tests: top-level messages — project selector buttons
 // ============================================================================
 
 describe('SlackCommandService message events — top-level', () => {
-  it('routes to running agent and registers thread', async () => {
-    const { deps, getMessageHandler } = createSetup({ linkedChannelId: 'C_LINKED', agentRunning: true });
+  it('posts project selection buttons for any channel message', async () => {
+    const { deps, getMessageHandler } = createSetup();
     const handler = getMessageHandler();
 
-    await handler({ type: 'message', text: 'hello agent', channel: 'C_LINKED', ts: 'user-ts-1' }, ack);
+    await handler({ type: 'message', text: 'do something', channel: 'C_ANY', ts: 'ts-1', user: 'U_ANY' }, ack);
 
-    expect(deps.agentManager.sendInput).toHaveBeenCalledWith(
-      sampleProject.id, 'hello agent', undefined, expect.objectContaining({ source: 'slack' }),
+    expect(deps.slackService.replyInThread).toHaveBeenCalledWith(
+      'xoxb-test', 'C_ANY', 'ts-1',
+      expect.stringContaining('Which project'),
+      expect.any(Array),
     );
-    expect(deps.threadTracker.register).toHaveBeenCalledWith(sampleProject.id, 'C_LINKED', 'user-ts-1');
-    expect(deps.threadTracker.setLatest).toHaveBeenCalledWith(sampleProject.id, 'C_LINKED', 'user-ts-1');
-    expect(deps.slackService.sendMessage).not.toHaveBeenCalled();
+    expect(deps.agentManager.startOneOffAgent).not.toHaveBeenCalled();
   });
 
-  it('starts agent when none is running and routes initial message', async () => {
-    const { deps, getMessageHandler } = createSetup({ linkedChannelId: 'C_LINKED', agentRunning: false });
+  it('posts "no projects registered" when project list is empty', async () => {
+    const { deps, getMessageHandler } = createSetup({ projects: [] });
     const handler = getMessageHandler();
 
-    await handler({ type: 'message', text: 'start doing stuff', channel: 'C_LINKED' }, ack);
+    await handler({ type: 'message', text: 'hello', channel: 'C_ANY', ts: 'ts-2', user: 'U_ANY' }, ack);
 
-    expect(deps.agentManager.startInteractiveAgent).toHaveBeenCalledWith(
-      sampleProject.id,
-      expect.objectContaining({ initialMessage: 'start doing stuff', slackMeta: expect.objectContaining({ source: 'slack' }) }),
+    expect(deps.slackService.replyInThread).toHaveBeenCalledWith(
+      'xoxb-test', 'C_ANY', 'ts-2', expect.stringContaining('No projects'),
     );
-    expect(deps.slackService.sendMessage).not.toHaveBeenCalled();
+    expect(deps.agentManager.startOneOffAgent).not.toHaveBeenCalled();
   });
 
-  it('ignores message in unlinked channel', async () => {
-    const { deps, getMessageHandler } = createSetup({ linkedChannelId: 'C_OTHER' });
+  it('shows project selector for multiple projects', async () => {
+    const project1: ProjectStatus = { ...sampleProject, id: 'p1', name: 'Alpha' };
+    const project2: ProjectStatus = { ...sampleProject, id: 'p2', name: 'Beta' };
+    const { deps, getMessageHandler } = createSetup({ projects: [project1, project2] });
     const handler = getMessageHandler();
 
-    await handler({ type: 'message', text: 'hello', channel: 'C_UNRELATED' }, ack);
+    await handler({ type: 'message', text: 'which project?', channel: 'C_ANY', ts: 'ts-3', user: 'U_ANY' }, ack);
 
-    expect(deps.agentManager.sendInput).not.toHaveBeenCalled();
-    expect(deps.agentManager.startInteractiveAgent).not.toHaveBeenCalled();
+    expect(deps.slackService.replyInThread).toHaveBeenCalledWith(
+      'xoxb-test', 'C_ANY', 'ts-3',
+      expect.any(String),
+      expect.any(Array),
+    );
+    expect(deps.agentManager.startOneOffAgent).not.toHaveBeenCalled();
   });
 
   it('ignores bot messages (bot_id set)', async () => {
-    const { deps, getMessageHandler } = createSetup({ linkedChannelId: 'C_LINKED' });
+    const { deps, getMessageHandler } = createSetup();
     const handler = getMessageHandler();
 
-    await handler({ type: 'message', text: 'bot says hello', channel: 'C_LINKED', bot_id: 'B_BOT' }, ack);
+    await handler({ type: 'message', text: 'bot says hello', channel: 'C_ANY', bot_id: 'B_BOT' }, ack);
 
-    expect(deps.agentManager.sendInput).not.toHaveBeenCalled();
-    expect(deps.agentManager.startInteractiveAgent).not.toHaveBeenCalled();
+    expect(deps.agentManager.startOneOffAgent).not.toHaveBeenCalled();
+    expect(deps.slackService.replyInThread).not.toHaveBeenCalled();
   });
 
   it('ignores messages with a subtype', async () => {
-    const { deps, getMessageHandler } = createSetup({ linkedChannelId: 'C_LINKED' });
+    const { deps, getMessageHandler } = createSetup();
     const handler = getMessageHandler();
 
-    await handler({ type: 'message', subtype: 'message_changed', text: 'edited', channel: 'C_LINKED' }, ack);
+    await handler({ type: 'message', subtype: 'message_changed', text: 'edited', channel: 'C_ANY' }, ack);
 
-    expect(deps.agentManager.sendInput).not.toHaveBeenCalled();
-    expect(deps.agentManager.startInteractiveAgent).not.toHaveBeenCalled();
+    expect(deps.agentManager.startOneOffAgent).not.toHaveBeenCalled();
+    expect(deps.slackService.replyInThread).not.toHaveBeenCalled();
   });
 
   it('ignores messages with empty text', async () => {
-    const { deps, getMessageHandler } = createSetup({ linkedChannelId: 'C_LINKED' });
+    const { deps, getMessageHandler } = createSetup();
     const handler = getMessageHandler();
 
-    await handler({ type: 'message', text: '   ', channel: 'C_LINKED' }, ack);
+    await handler({ type: 'message', text: '   ', channel: 'C_ANY' }, ack);
 
-    expect(deps.agentManager.sendInput).not.toHaveBeenCalled();
-    expect(deps.agentManager.startInteractiveAgent).not.toHaveBeenCalled();
+    expect(deps.agentManager.startOneOffAgent).not.toHaveBeenCalled();
+    expect(deps.slackService.replyInThread).not.toHaveBeenCalled();
   });
 
   it('ignores messages with no channel', async () => {
-    const { deps, getMessageHandler } = createSetup({ linkedChannelId: 'C_LINKED' });
+    const { deps, getMessageHandler } = createSetup();
     const handler = getMessageHandler();
 
     await handler({ type: 'message', text: 'hello' }, ack);
 
-    expect(deps.agentManager.sendInput).not.toHaveBeenCalled();
-    expect(deps.agentManager.startInteractiveAgent).not.toHaveBeenCalled();
+    expect(deps.agentManager.startOneOffAgent).not.toHaveBeenCalled();
+    expect(deps.slackService.replyInThread).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================================
+// Tests: select_project interactive action
+// ============================================================================
+
+describe('SlackCommandService interactive action — select_project', () => {
+  it('starts one-off agent when user selects a project', async () => {
+    const { deps, getMessageHandler, getInteractiveHandler } = createSetup();
+    const msgHandler = getMessageHandler();
+    const actionHandler = getInteractiveHandler();
+
+    // Step 1: top-level message stores pending context; selector reply returns its ts
+    deps.slackService.replyInThread.mockResolvedValueOnce('ts-selector-msg');
+    await msgHandler({ type: 'message', text: 'do something', channel: 'C_ANY', ts: 'ts-sel', user: 'U_ANY' }, ack);
+
+    // Step 2: user clicks the button
+    const actionBody: InteractiveActionBody = {
+      actions: [{
+        action_id: 'select_project_0',
+        value: `${sampleProject.id}|C_ANY|ts-sel`,
+      }],
+      user: { id: 'U_ANY' },
+    } as unknown as InteractiveActionBody;
+
+    await actionHandler(actionBody, ack);
+
+    expect(deps.agentManager.startOneOffAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: sampleProject.id, message: 'do something' }),
+    );
+    expect(deps.slackService.replyInThread).toHaveBeenCalledWith(
+      'xoxb-test', 'C_ANY', 'ts-sel', '⏳ Working on it...',
+    );
+    expect(deps.slackService.updateMessage).toHaveBeenCalledWith(
+      'xoxb-test', 'C_ANY', 'ts-selector-msg',
+      expect.stringContaining(sampleProject.name), [],
+    );
+  });
+
+  it('silently ignores duplicate action when context is already consumed', async () => {
+    const { deps, getInteractiveHandler } = createSetup();
+    const actionHandler = getInteractiveHandler();
+
+    const actionBody: InteractiveActionBody = {
+      actions: [{
+        action_id: 'select_project_0',
+        value: `${sampleProject.id}|C_ANY|ts-unknown`,
+      }],
+      user: { id: 'U_ANY' },
+    } as unknown as InteractiveActionBody;
+
+    await actionHandler(actionBody, ack);
+
+    expect(deps.agentManager.startOneOffAgent).not.toHaveBeenCalled();
+    expect(deps.slackService.replyInThread).not.toHaveBeenCalledWith(
+      expect.any(String), expect.any(String), expect.any(String), expect.stringContaining('expired'),
+    );
   });
 });
 
@@ -194,7 +283,20 @@ describe('SlackCommandService message events — top-level', () => {
 // ============================================================================
 
 describe('SlackCommandService message events — thread replies', () => {
-  it('routes thread reply to running agent', async () => {
+  it('routes thread reply to one-off agent via tracker', async () => {
+    const { deps, getMessageHandler } = createSetup({
+      trackerOneOffId: 'oneoff-tracked-id',
+    });
+    deps.agentManager.getOneOffMeta.mockReturnValue({ projectId: sampleProject.id, label: 'test' });
+    const handler = getMessageHandler();
+
+    await handler({ type: 'message', text: 'reply text', channel: 'C_ANY', thread_ts: 'ts-tracked' }, ack);
+
+    expect(deps.agentManager.sendOneOffInput).toHaveBeenCalledWith('oneoff-tracked-id', 'reply text');
+    expect(deps.threadTracker.findOneOffId).toHaveBeenCalledWith('C_ANY', 'ts-tracked');
+  });
+
+  it('starts new one-off agent for thread reply when no active one-off agent, even if main agent is running', async () => {
     const { deps, getMessageHandler } = createSetup({
       agentRunning: true,
       trackerProjectId: sampleProject.id,
@@ -203,7 +305,10 @@ describe('SlackCommandService message events — thread replies', () => {
 
     await handler({ type: 'message', text: 'follow up', channel: 'C_ANY', thread_ts: 'ts-tracked' }, ack);
 
-    expect(deps.agentManager.sendInput).toHaveBeenCalledWith(sampleProject.id, 'follow up');
+    expect(deps.agentManager.sendInput).not.toHaveBeenCalled();
+    expect(deps.agentManager.startOneOffAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: sampleProject.id, message: 'follow up' }),
+    );
     expect(deps.threadTracker.find).toHaveBeenCalledWith('C_ANY', 'ts-tracked');
   });
 
@@ -214,10 +319,11 @@ describe('SlackCommandService message events — thread replies', () => {
     await handler({ type: 'message', text: 'reply', channel: 'C_ANY', thread_ts: 'ts-unknown' }, ack);
 
     expect(deps.agentManager.sendInput).not.toHaveBeenCalled();
+    expect(deps.agentManager.startOneOffAgent).not.toHaveBeenCalled();
     expect(deps.slackService.replyInThread).not.toHaveBeenCalled();
   });
 
-  it('sends "no agent running" reply for tracked thread when agent is stopped', async () => {
+  it('starts new one-off agent for subsequent message on known thread when main agent is stopped', async () => {
     const { deps, getMessageHandler } = createSetup({
       agentRunning: false,
       trackerProjectId: sampleProject.id,
@@ -227,11 +333,11 @@ describe('SlackCommandService message events — thread replies', () => {
     await handler({ type: 'message', text: 'hello?', channel: 'C_ANY', thread_ts: 'ts-tracked' }, ack);
 
     expect(deps.agentManager.sendInput).not.toHaveBeenCalled();
+    expect(deps.agentManager.startOneOffAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: sampleProject.id, message: 'hello?' }),
+    );
     expect(deps.slackService.replyInThread).toHaveBeenCalledWith(
-      'xoxb-test',
-      'C_ANY',
-      'ts-tracked',
-      expect.stringContaining('No agent is running'),
+      'xoxb-test', 'C_ANY', 'ts-tracked', '⏳ Working on it...',
     );
   });
 });
@@ -330,7 +436,7 @@ describe('SlackCommandService slash commands — status', () => {
 // ============================================================================
 
 describe('SlackCommandService slash commands — list', () => {
-  function createStatusSetup(projects: ProjectStatus[], runningIds: string[]) {
+  function createListSetup(projects: ProjectStatus[], runningIds: string[]) {
     const agentManager = createMockAgentManager();
     agentManager.getRunningProjectIds.mockReturnValue(runningIds);
 
@@ -370,7 +476,7 @@ describe('SlackCommandService slash commands — list', () => {
     const project1 = { ...sampleProject, id: 'id-1', name: 'Project One', slackLinkedChannelId: 'C_CURRENT' };
     const project2 = { ...sampleProject, id: 'id-2', name: 'Project Two', slackLinkedChannelId: 'C_OTHER' };
     const project3 = { ...sampleProject, id: 'id-3', name: 'Project Three', slackLinkedChannelId: undefined };
-    const { slackService, handler } = createStatusSetup([project1, project2, project3], ['id-1']);
+    const { slackService, handler } = createListSetup([project1, project2, project3], ['id-1']);
 
     await handler(listBody('C_CURRENT'), ack);
 
@@ -383,7 +489,7 @@ describe('SlackCommandService slash commands — list', () => {
   });
 
   it('shows "no projects" message when registry is empty', async () => {
-    const { slackService, handler } = createStatusSetup([], []);
+    const { slackService, handler } = createListSetup([], []);
 
     await handler(listBody('C_CURRENT'), ack);
 
@@ -393,12 +499,111 @@ describe('SlackCommandService slash commands — list', () => {
 
   it('shows plain name when project has no running agent and no linked channel', async () => {
     const project = { ...sampleProject, slackLinkedChannelId: undefined };
-    const { slackService, handler } = createStatusSetup([project], []);
+    const { slackService, handler } = createListSetup([project], []);
 
     await handler(listBody('C_CURRENT'), ack);
 
     const reply = (slackService.sendMessage.mock.calls[0] as string[])[2];
     expect(reply).toContain(`• *${sampleProject.name}*`);
     expect(reply).not.toContain(' — ');
+  });
+});
+
+// ============================================================================
+// Tests: subscribeOneOffToSlack result delivery
+// ============================================================================
+
+describe('SlackCommandService — subscribeOneOffToSlack result delivery', () => {
+  async function setupAndTriggerAction(deps: TestSetup['deps'], getMessageHandler: TestSetup['getMessageHandler'], getInteractiveHandler: TestSetup['getInteractiveHandler']) {
+    const msgHandler = getMessageHandler();
+    const actionHandler = getInteractiveHandler();
+
+    deps.slackService.replyInThread
+      .mockResolvedValueOnce('ts-selector-msg')
+      .mockResolvedValueOnce('ts-working-msg');
+
+    await msgHandler({ type: 'message', text: 'do something', channel: 'C_ANY', ts: 'ts-sel', user: 'U_ANY' }, ack);
+
+    const actionBody: InteractiveActionBody = {
+      actions: [{ action_id: 'select_project_0', value: `${sampleProject.id}|C_ANY|ts-sel` }],
+      user: { id: 'U_ANY' },
+    } as unknown as InteractiveActionBody;
+
+    await actionHandler(actionBody, ack);
+  }
+
+  function extractListener<T extends (...args: never[]) => void>(
+    onMock: jest.Mock,
+    event: string,
+  ): T {
+    const call = onMock.mock.calls.find(([e]: [string]) => e === event);
+    return call![1] as T;
+  }
+
+  it('sends delta to Slack when one-off agent is waiting (keeps agent alive)', async () => {
+    const { deps, getMessageHandler, getInteractiveHandler } = createSetup();
+    deps.agentManager.getOneOffCollectedOutput.mockReturnValue('Task completed successfully');
+
+    await setupAndTriggerAction(deps, getMessageHandler, getInteractiveHandler);
+
+    const onWaiting = extractListener<(id: string, isWaiting: boolean, version: number) => void>(
+      deps.agentManager.on as jest.Mock,
+      'oneOffWaiting',
+    );
+    onWaiting('oneoff-test-id', true, 1);
+    await Promise.resolve();
+
+    // Agent is NOT stopped — it stays alive for the user's thread reply
+    expect(deps.agentManager.stopOneOffAgent).not.toHaveBeenCalled();
+    expect(deps.slackService.updateMessage).toHaveBeenCalledWith(
+      'xoxb-test', 'C_ANY', 'ts-working-msg',
+      expect.stringContaining('Task completed successfully'),
+    );
+  });
+
+  it('falls back to oneOffStatus=stopped when agent exits unexpectedly', async () => {
+    const { deps, getMessageHandler, getInteractiveHandler } = createSetup();
+    deps.agentManager.getOneOffCollectedOutput.mockReturnValue('Fallback output');
+
+    await setupAndTriggerAction(deps, getMessageHandler, getInteractiveHandler);
+
+    const onStatus = extractListener<(id: string, status: AgentStatus) => void>(
+      deps.agentManager.on as jest.Mock,
+      'oneOffStatus',
+    );
+    onStatus('oneoff-test-id', 'stopped');
+    await Promise.resolve();
+
+    expect(deps.slackService.updateMessage).toHaveBeenCalledWith(
+      'xoxb-test', 'C_ANY', 'ts-working-msg',
+      expect.stringContaining('Fallback output'),
+    );
+  });
+
+  it('does not double-send if both oneOffWaiting and oneOffStatus=stopped fire', async () => {
+    const { deps, getMessageHandler, getInteractiveHandler } = createSetup();
+    deps.agentManager.getOneOffCollectedOutput.mockReturnValue('Output text');
+
+    await setupAndTriggerAction(deps, getMessageHandler, getInteractiveHandler);
+
+    const onWaiting = extractListener<(id: string, isWaiting: boolean, version: number) => void>(
+      deps.agentManager.on as jest.Mock,
+      'oneOffWaiting',
+    );
+    const onStatus = extractListener<(id: string, status: AgentStatus) => void>(
+      deps.agentManager.on as jest.Mock,
+      'oneOffStatus',
+    );
+
+    onWaiting('oneoff-test-id', true, 1);
+    onStatus('oneoff-test-id', 'stopped');
+    await Promise.resolve();
+
+    // 2 total updateMessage calls: 1 for selector update + 1 for result (not 3)
+    expect(deps.slackService.updateMessage).toHaveBeenCalledTimes(2);
+    expect(deps.slackService.updateMessage).toHaveBeenCalledWith(
+      'xoxb-test', 'C_ANY', 'ts-working-msg',
+      expect.stringContaining('Output text'),
+    );
   });
 });

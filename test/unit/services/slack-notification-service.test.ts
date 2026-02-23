@@ -9,7 +9,6 @@ import { SlackService } from '../../../src/services/slack-service';
 import { SettingsRepository, GlobalSettings } from '../../../src/repositories/settings';
 import { ProjectRepository, ProjectStatus, SlackNotificationConfig } from '../../../src/repositories/project';
 import { RalphLoopService } from '../../../src/services/ralph-loop/types';
-import { AgentMessage } from '../../../src/agents/types';
 import { DEFAULT_TEST_SETTINGS, sampleProject } from '../helpers/mock-factories';
 
 // ============================================================================
@@ -382,7 +381,7 @@ describe('DefaultSlackNotificationService ralph loop events', () => {
 // ============================================================================
 
 describe('DefaultSlackNotificationService linked channel feed', () => {
-  it('sends summary to linked channel when agent completes', async () => {
+  it('does not send linked channel summary when no active thread exists', async () => {
     const deps = createDeps({ notificationConfig: null });
     (deps.projectRepository.findById as jest.Mock).mockResolvedValue({
       ...sampleProject,
@@ -400,11 +399,8 @@ describe('DefaultSlackNotificationService linked channel feed', () => {
 
     await new Promise((r) => setTimeout(r, 10));
 
-    expect(deps.slackService.sendMessage).toHaveBeenCalledWith(
-      'xoxb-test-token',
-      'C_LINKED_CHANNEL',
-      expect.stringContaining('completed'),
-    );
+    expect(deps.slackService.sendMessage).not.toHaveBeenCalled();
+    expect(deps.slackService.replyInThread).not.toHaveBeenCalled();
   });
 
   it('skips linked channel summary when notification config already targets the linked channel', async () => {
@@ -443,6 +439,8 @@ describe('DefaultSlackNotificationService linked channel feed', () => {
       find: jest.fn().mockReturnValue(null),
       setLatest: jest.fn(),
       getLatest: jest.fn().mockReturnValue({ channelId: 'C_LINKED_CHANNEL', threadTs: 'user-msg-ts' }),
+      registerOneOff: jest.fn(),
+      findOneOffId: jest.fn().mockReturnValue(null),
     };
 
     const service = new DefaultSlackNotificationService({ ...deps, threadTracker });
@@ -462,259 +460,6 @@ describe('DefaultSlackNotificationService linked channel feed', () => {
       expect.stringContaining('completed'),
     );
     expect(deps.slackService.sendMessage).not.toHaveBeenCalled();
-  });
-});
-
-// ============================================================================
-// Tests: agent message forwarding to Slack
-// ============================================================================
-
-type AgentEmitter = { emit: (e: string, ...a: unknown[]) => void };
-
-function makeStdout(content: string): AgentMessage {
-  return { type: 'stdout', content, timestamp: new Date().toISOString() };
-}
-
-function makePlanModeExit(planContent?: string): AgentMessage {
-  return {
-    type: 'plan_mode',
-    content: '',
-    timestamp: new Date().toISOString(),
-    planModeInfo: { action: 'exit', planContent },
-  };
-}
-
-describe('DefaultSlackNotificationService agent message forwarding', () => {
-  function createLinkedDeps() {
-    const deps = createDeps({ notificationConfig: null });
-    (deps.projectRepository.findById as jest.Mock).mockResolvedValue({
-      ...sampleProject,
-      slackNotification: null,
-      slackLinkedChannelId: 'C_LINKED_CHANNEL',
-    });
-
-    const threadTracker = {
-      register: jest.fn(),
-      find: jest.fn().mockReturnValue(null),
-      setLatest: jest.fn(),
-      getLatest: jest.fn().mockReturnValue({ channelId: 'C_LINKED_CHANNEL', threadTs: 'orig-ts' }),
-    };
-
-    return { deps, threadTracker };
-  }
-
-  it('accumulates stdout messages and replies in thread when agent completes', async () => {
-    const { deps, threadTracker } = createLinkedDeps();
-    const service = new DefaultSlackNotificationService({ ...deps, threadTracker });
-    service.start();
-
-    const em = deps.agentManager as unknown as AgentEmitter;
-    em.emit('status', sampleProject.id, 'running');
-    em.emit('message', sampleProject.id, makeStdout('Hello from Claude'));
-    em.emit('message', sampleProject.id, makeStdout(' — part two'));
-    em.emit('status', sampleProject.id, 'stopped');
-
-    await new Promise((r) => setTimeout(r, 10));
-
-    expect(deps.slackService.replyInThread).toHaveBeenCalledWith(
-      'xoxb-test-token',
-      'C_LINKED_CHANNEL',
-      'orig-ts',
-      expect.stringContaining('Hello from Claude'),
-      expect.any(Array),
-    );
-  });
-
-  it('replaces accumulated buffer with plan content on plan_mode exit', async () => {
-    const { deps, threadTracker } = createLinkedDeps();
-    const service = new DefaultSlackNotificationService({ ...deps, threadTracker });
-    service.start();
-
-    const em = deps.agentManager as unknown as AgentEmitter;
-    em.emit('status', sampleProject.id, 'running');
-    em.emit('message', sampleProject.id, makeStdout('some earlier stdout'));
-    em.emit('message', sampleProject.id, makePlanModeExit('## My Plan\n- Step 1'));
-    em.emit('status', sampleProject.id, 'stopped');
-
-    await new Promise((r) => setTimeout(r, 10));
-
-    const call = (deps.slackService.replyInThread as jest.Mock).mock.calls[0];
-    expect(call[3]).toContain('## My Plan');
-    expect(call[3]).not.toContain('some earlier stdout');
-  });
-
-  it('sends pending reply when agent starts waiting for input', async () => {
-    const { deps, threadTracker } = createLinkedDeps();
-    const service = new DefaultSlackNotificationService({ ...deps, threadTracker });
-    service.start();
-
-    const em = deps.agentManager as unknown as AgentEmitter;
-    em.emit('status', sampleProject.id, 'running');
-    em.emit('message', sampleProject.id, makeStdout('Waiting for your input'));
-    em.emit('waitingForInput', sampleProject.id, { isWaiting: true, version: 1 });
-
-    await new Promise((r) => setTimeout(r, 10));
-
-    expect(deps.slackService.replyInThread).toHaveBeenCalledWith(
-      'xoxb-test-token',
-      'C_LINKED_CHANNEL',
-      'orig-ts',
-      expect.stringContaining('Waiting for your input'),
-      expect.any(Array),
-    );
-  });
-
-  it('does not send empty reply when no stdout messages were accumulated', async () => {
-    const { deps, threadTracker } = createLinkedDeps();
-    const service = new DefaultSlackNotificationService({ ...deps, threadTracker });
-    service.start();
-
-    const em = deps.agentManager as unknown as AgentEmitter;
-    em.emit('status', sampleProject.id, 'running');
-    em.emit('status', sampleProject.id, 'stopped');
-
-    await new Promise((r) => setTimeout(r, 10));
-
-    // replyInThread may be called for the summary but NOT for a pending reply (no stdout)
-    const replyInThreadCalls = (deps.slackService.replyInThread as jest.Mock).mock.calls;
-    // If it was called, it must be for the linked channel summary (contains 'completed'), not an empty reply
-    replyInThreadCalls.forEach((call) => {
-      expect(call[3]).toBeTruthy();
-    });
-  });
-
-  it('passes blocks to replyInThread when forwarding agent reply', async () => {
-    const { deps, threadTracker } = createLinkedDeps();
-    const service = new DefaultSlackNotificationService({ ...deps, threadTracker });
-    service.start();
-
-    const em = deps.agentManager as unknown as AgentEmitter;
-    em.emit('status', sampleProject.id, 'running');
-    em.emit('message', sampleProject.id, makeStdout('Some response'));
-    em.emit('status', sampleProject.id, 'stopped');
-
-    await new Promise((r) => setTimeout(r, 10));
-
-    const call = (deps.slackService.replyInThread as jest.Mock).mock.calls
-      .find((c) => c[3] === 'Some response');
-    expect(call).toBeDefined();
-    expect(call![4]).toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: 'section' }),
-    ]));
-  });
-});
-
-// ============================================================================
-// Tests: Working on it... message
-// ============================================================================
-
-describe('DefaultSlackNotificationService working message', () => {
-  function createLinkedDepsWithTracker() {
-    const deps = createDeps({ notificationConfig: null });
-    (deps.projectRepository.findById as jest.Mock).mockResolvedValue({
-      ...sampleProject,
-      slackNotification: null,
-      slackLinkedChannelId: 'C_LINKED_CHANNEL',
-    });
-
-    const threadTracker = {
-      register: jest.fn(),
-      find: jest.fn().mockReturnValue(null),
-      setLatest: jest.fn(),
-      getLatest: jest.fn().mockReturnValue({ channelId: 'C_LINKED_CHANNEL', threadTs: 'orig-ts' }),
-    };
-
-    return { deps, threadTracker };
-  }
-
-  it('posts Working on it when slack user message received', async () => {
-    const { deps, threadTracker } = createLinkedDepsWithTracker();
-    const service = new DefaultSlackNotificationService({ ...deps, threadTracker });
-    service.start();
-
-    (deps.agentManager as unknown as AgentEmitter).emit('message', sampleProject.id, {
-      type: 'user',
-      source: 'slack',
-      content: 'do something',
-      timestamp: new Date().toISOString(),
-    });
-
-    await new Promise((r) => setTimeout(r, 10));
-
-    expect(deps.slackService.replyInThread).toHaveBeenCalledWith(
-      'xoxb-test-token',
-      'C_LINKED_CHANNEL',
-      'orig-ts',
-      '⏳ Working on it...',
-      expect.any(Array),
-    );
-  });
-
-  it('updates Working on it message when sending reply', async () => {
-    const { deps, threadTracker } = createLinkedDepsWithTracker();
-    const service = new DefaultSlackNotificationService({ ...deps, threadTracker });
-    service.start();
-
-    const em = deps.agentManager as unknown as AgentEmitter;
-    em.emit('status', sampleProject.id, 'running');
-    em.emit('message', sampleProject.id, { type: 'user', source: 'slack', content: 'do something', timestamp: new Date().toISOString() });
-    em.emit('message', sampleProject.id, makeStdout('Here is my answer'));
-    em.emit('status', sampleProject.id, 'stopped');
-
-    await new Promise((r) => setTimeout(r, 10));
-
-    expect(deps.slackService.updateMessage).toHaveBeenCalledWith(
-      'xoxb-test-token',
-      'C_LINKED_CHANNEL',
-      '1234567890.000100',
-      'Here is my answer',
-      expect.any(Array),
-    );
-
-    // replyInThread should only have been called once for the "Working on it" placeholder
-    const workingCalls = (deps.slackService.replyInThread as jest.Mock).mock.calls.filter(
-      (c) => c[3] === '⏳ Working on it...'
-    );
-    expect(workingCalls).toHaveLength(1);
-  });
-
-  it('posts new reply when no working message', async () => {
-    const { deps, threadTracker } = createLinkedDepsWithTracker();
-    const service = new DefaultSlackNotificationService({ ...deps, threadTracker });
-    service.start();
-
-    const em = deps.agentManager as unknown as AgentEmitter;
-    em.emit('status', sampleProject.id, 'running');
-    em.emit('message', sampleProject.id, makeStdout('Here is my answer'));
-    em.emit('status', sampleProject.id, 'stopped');
-
-    await new Promise((r) => setTimeout(r, 10));
-
-    expect(deps.slackService.updateMessage).not.toHaveBeenCalled();
-    expect(deps.slackService.replyInThread).toHaveBeenCalledWith(
-      'xoxb-test-token',
-      'C_LINKED_CHANNEL',
-      'orig-ts',
-      'Here is my answer',
-      expect.any(Array),
-    );
-  });
-
-  it('only posts one working message per project (idempotent)', async () => {
-    const { deps, threadTracker } = createLinkedDepsWithTracker();
-    const service = new DefaultSlackNotificationService({ ...deps, threadTracker });
-    service.start();
-
-    const em = deps.agentManager as unknown as AgentEmitter;
-    em.emit('message', sampleProject.id, { type: 'user', source: 'slack', content: 'first', timestamp: new Date().toISOString() });
-    em.emit('message', sampleProject.id, { type: 'user', source: 'slack', content: 'second', timestamp: new Date().toISOString() });
-
-    await new Promise((r) => setTimeout(r, 10));
-
-    const workingCalls = (deps.slackService.replyInThread as jest.Mock).mock.calls.filter(
-      (c) => c[3] === '⏳ Working on it...'
-    );
-    expect(workingCalls).toHaveLength(1);
   });
 });
 

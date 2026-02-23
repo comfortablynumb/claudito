@@ -42,6 +42,10 @@ export interface SlackValidationResult {
 // WebClient factory (injectable for testing)
 // ============================================================================
 
+interface SlackUserInfoResult {
+  user?: { profile?: { display_name?: string; real_name?: string } };
+}
+
 export interface SlackWebClientFactory {
   create(botToken: string): SlackWebClientAdapter;
 }
@@ -73,25 +77,24 @@ function wrapWebClient(client: WebClient): SlackWebClientAdapter {
       client.chat.postMessage({
         channel: channelId,
         text,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment
         blocks: blocks as any,
         ...(threadTs ? { thread_ts: threadTs } : {}),
       }) as Promise<{ ts?: string }>,
     conversationsList: () =>
       client.conversations.list({ exclude_archived: true, limit: 200 }) as Promise<{ channels?: SlackChannelInfo[] }>,
-    getUserInfo: async (userId: string) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const result = await (client.users.info({ user: userId }) as Promise<any>);
+    getUserInfo: async (userId: string): Promise<{ displayName?: string } | null> => {
+      const result = (await client.users.info({ user: userId })) as unknown as SlackUserInfoResult;
       const profile = result?.user?.profile;
       if (!profile) return null;
-      return { displayName: (profile.display_name as string) || (profile.real_name as string) || undefined };
+      return { displayName: profile.display_name || profile.real_name || undefined };
     },
-    updateMessage: async ({ channel, ts, text, blocks }) => {
+    updateMessage: async ({ channel, ts, text, blocks }): Promise<void> => {
       await client.chat.update({
         channel,
         ts,
         text,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment
         blocks: blocks as any,
       });
     },
@@ -371,34 +374,40 @@ export class DefaultSlackSocketService implements SlackSocketService {
   private setupEventListeners(): void {
     if (!this.client) return;
 
-    this.client.on('slash_commands', async ({ body, ack }: { body: Record<string, unknown>; ack: () => Promise<void> }) => {
-      this.logger.debug('Slash command event received via socket');
+    this.client.on('slash_commands', ({ body, ack }: { body: Record<string, unknown>; ack: () => Promise<void> }) => {
+      void (async (): Promise<void> => {
+        this.logger.debug('Slash command event received via socket');
 
-      if (this.slashCommandHandler) {
-        await this.slashCommandHandler(body as unknown as SlashCommandBody, ack);
-      } else {
-        await ack();
-      }
+        if (this.slashCommandHandler) {
+          await this.slashCommandHandler(body as unknown as SlashCommandBody, ack);
+        } else {
+          await ack();
+        }
+      })();
     });
 
-    this.client.on('interactive', async ({ body, ack }: { body: Record<string, unknown>; ack: () => Promise<void> }) => {
-      this.logger.debug('Interactive event received via socket');
+    this.client.on('interactive', ({ body, ack }: { body: Record<string, unknown>; ack: () => Promise<void> }) => {
+      void (async (): Promise<void> => {
+        this.logger.debug('Interactive event received via socket');
 
-      if (this.interactiveActionHandler) {
-        await this.interactiveActionHandler(body as unknown as InteractiveActionBody, ack);
-      } else {
-        await ack();
-      }
+        if (this.interactiveActionHandler) {
+          await this.interactiveActionHandler(body as unknown as InteractiveActionBody, ack);
+        } else {
+          await ack();
+        }
+      })();
     });
 
-    this.client.on('message', async ({ event, ack }: { event: Record<string, unknown>; ack: () => Promise<void> }) => {
-      this.logger.debug('Message event received via socket');
+    this.client.on('message', ({ event, ack }: { event: Record<string, unknown>; ack: () => Promise<void> }) => {
+      void (async (): Promise<void> => {
+        this.logger.debug('Message event received via socket');
 
-      if (this.messageHandler) {
-        await this.messageHandler(event as unknown as SlackMessageEvent, ack);
-      } else {
-        await ack();
-      }
+        if (this.messageHandler) {
+          await this.messageHandler(event as unknown as SlackMessageEvent, ack);
+        } else {
+          await ack();
+        }
+      })();
     });
   }
 }

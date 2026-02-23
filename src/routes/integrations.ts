@@ -401,7 +401,10 @@ export function createIntegrationsRouter(deps: IntegrationsRouterDependencies): 
   }));
 
   router.post('/slack/link', asyncHandler(async (req, res) => {
-    const { projectId, channelId } = req.body as { projectId?: string; channelId?: string };
+    const { projectId, channelId } = req.body as {
+      projectId?: string;
+      channelId?: string;
+    };
 
     if (!projectId) {
       throw new ValidationError('projectId is required');

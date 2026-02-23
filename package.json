@@ -1,6 +1,6 @@
 {
   "name": "claudito",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "description": "Claude Code autonomous agent manager - A web UI for managing Claude Code agents",
   "main": "dist/index.js",
   "bin": {

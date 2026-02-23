@@ -202,6 +202,12 @@ export function createAgentRouter(deps: ProjectRouterDependencies): Router {
     res.json({ contextUsage });
   }));
 
+  // List active one-off agents for this project
+  router.get('/oneoff', validateProjectExists(projectRepository), asyncHandler((req: Request, res: Response) => {
+    const id = req.params['id'] as string;
+    res.json({ agents: agentManager.getActiveOneOffAgents(id) });
+  }));
+
   // Answer an AskUserQuestion from the agent
   router.post('/answer', validateProjectExists(projectRepository), moderateRateLimit, asyncHandler((req: Request, res: Response) => {
     const id = req.params['id'] as string;

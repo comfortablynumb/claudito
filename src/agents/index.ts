@@ -11,6 +11,7 @@ export {
   StartAgentResult,
   OneOffAgentOptions,
   OneOffMeta,
+  ActiveOneOffAgent,
 } from './agent-manager';
 
 // Export from new modules

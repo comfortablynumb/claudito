@@ -1427,5 +1427,30 @@ describe('AgentManager Lifecycle Tests', () => {
 
       expect(agentManager.getOneOffStatus(oneOffId)).toBeNull();
     });
+
+    it('should return active one-off agents for correct project only', async () => {
+      const otherProjectId = 'other-project';
+      const otherProject = createTestProject({ id: otherProjectId, name: 'Other', path: '/other' });
+      addProjectToRepository(otherProject);
+
+      const id1 = await agentManager.startOneOffAgent({ projectId, message: 'task 1', label: 'Task One' });
+      await agentManager.startOneOffAgent({ projectId: otherProjectId, message: 'task 2', label: 'Task Two' });
+
+      const agents = agentManager.getActiveOneOffAgents(projectId);
+
+      expect(agents).toHaveLength(1);
+      expect(agents[0]!.oneOffId).toBe(id1);
+      expect(agents[0]!.label).toBe('Task One');
+      expect(agents[0]!.status).toBe('running');
+
+      const otherAgents = agentManager.getActiveOneOffAgents(otherProjectId);
+      expect(otherAgents).toHaveLength(1);
+      expect(otherAgents[0]!.label).toBe('Task Two');
+    });
+
+    it('should return empty array for project with no active one-off agents', () => {
+      const agents = agentManager.getActiveOneOffAgents(projectId);
+      expect(agents).toEqual([]);
+    });
   });
 });

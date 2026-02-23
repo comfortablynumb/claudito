@@ -3606,6 +3606,9 @@
       // Notify OneOffTabsModule of project change
       if (typeof OneOffTabsModule !== 'undefined') {
         OneOffTabsModule.onProjectChanged(projectId);
+        if (projectId) {
+          OneOffTabsModule.loadActiveOneOffAgents(projectId);
+        }
       }
 
       // Notify GitHubIssuesModule of project change

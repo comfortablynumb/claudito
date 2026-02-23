@@ -55,7 +55,7 @@
     return state.oneOffTabs[projectId];
   }
 
-  function createTab(projectId, oneOffId, label) {
+  function ensureTab(projectId, oneOffId, label) {
     var tabs = getProjectTabs(projectId);
     var existing = tabs.find(function(t) { return t.oneOffId === oneOffId; });
 
@@ -75,6 +75,10 @@
 
     renderTabBar(projectId);
     createTabContainer(oneOffId);
+  }
+
+  function createTab(projectId, oneOffId, label) {
+    ensureTab(projectId, oneOffId, label);
     switchToTab(oneOffId);
   }
 
@@ -195,6 +199,11 @@
     if (projectId !== state.selectedProjectId) return;
 
     var tab = findTab(oneOffId);
+
+    if (!tab && message.label) {
+      ensureTab(projectId, oneOffId, message.label);
+      tab = findTab(oneOffId);
+    }
 
     if (!tab) return;
 
@@ -517,6 +526,19 @@
     $('#oneoff-conversation').empty();
   }
 
+  function loadActiveOneOffAgents(projectId) {
+    if (!api) return;
+
+    api.getActiveOneOffAgents(projectId)
+      .done(function(data) {
+        if (!data || !data.agents) return;
+
+        data.agents.forEach(function(agent) {
+          ensureTab(projectId, agent.oneOffId, agent.label);
+        });
+      });
+  }
+
   return {
     init: init,
     createTab: createTab,
@@ -529,6 +551,7 @@
     updateWaiting: updateWaiting,
     renderConversation: renderConversation,
     renderTabBar: renderTabBar,
-    onProjectChanged: onProjectChanged
+    onProjectChanged: onProjectChanged,
+    loadActiveOneOffAgents: loadActiveOneOffAgents
   };
 }));
