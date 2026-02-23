@@ -324,6 +324,28 @@ Generate new project ideas and have them automatically built:
 
 Configure the output folder in Settings > General > Inventify Folder.
 
+### Slack Integration
+
+Connect Claudito to your Slack workspace to receive agent notifications and send commands from Slack:
+
+| Feature | Description |
+|---------|-------------|
+| **Agent Notifications** | Block Kit messages on agent completed, failed, waiting for input, Ralph Loop events |
+| **Per-Project Config** | Configure notification channel, event types, @mention users, thread replies |
+| **Thread-Based Updates** | First notification starts a thread; subsequent events for the same project reply in-thread |
+| **Channel Feeds** | Link a Slack channel to a project for automatic conversation summaries on completion |
+| **Slash Commands** | `/claudito status`, `/claudito start <project> <prompt>`, `/claudito stop <project>`, `/claudito link`, `/claudito unlink` |
+| **Interactive Buttons** | Stop Agent, Approve Plan, Reject Plan actions directly from Slack notifications |
+
+**Setup**:
+1. Create a Slack App with Bot Token Scopes: `chat:write`, `channels:history`, `channels:read`, `groups:history`, `groups:read`
+2. Enable Socket Mode and add App Token Scope: `connections:write`
+3. Enable **Event Subscriptions** and under *Subscribe to bot events* add: `message.channels`, `message.groups`
+4. Add the `/claudito` slash command pointing to your Socket Mode app
+5. In Claudito Settings → Integrations → Slack: enter Bot Token and App Token
+6. **Invite the bot to every channel** you want to link: `/invite @<botname>`
+7. Per-project notifications: go to any project's settings and configure the Slack notification channel and event types
+
 ### Additional Features
 
 - **CLAUDE.md Editor**: Edit global and project-specific CLAUDE.md files with preview and AI-powered optimization
@@ -522,6 +544,17 @@ GET  /api/integrations/github/collaborators       # List repo collaborators (?re
 POST /api/integrations/github/pr                  # Create PR (body: repo, title, body, base?, draft?)
 GET  /api/integrations/github/pulls               # List PRs (?repo=&state=&limit=)
 GET  /api/integrations/github/pulls/:num          # PR detail with reviews & comments (?repo=)
+
+GET  /api/integrations/slack/status               # Slack connection state, workspace name, bot user info
+POST /api/integrations/slack/validate             # Validate bot token (body: {botToken})
+GET  /api/integrations/slack/channels             # List available channels (requires configured bot token)
+POST /api/integrations/slack/link                 # Link channel to project (body: {projectId, channelId})
+DELETE /api/integrations/slack/link/:projectId    # Unlink channel from project
+PUT  /api/integrations/slack/settings             # Update Slack settings (body: {botToken?, appToken?, defaultChannelId?, enabled?})
+
+GET    /api/projects/:id/slack                    # Get per-project notification config
+PUT    /api/projects/:id/slack                    # Set per-project notification config (body: {channelId, events[], mentionUsers[], threadReplies})
+DELETE /api/projects/:id/slack                    # Remove per-project notification config
 ```
 
 ### Projects

@@ -226,17 +226,25 @@ export function createAgentRouter(deps: ProjectRouterDependencies): Router {
   }));
 
   // Send input to running interactive agent
-  router.post('/send', validateBody(agentSendMessageSchema), validateProjectExists(projectRepository), moderateRateLimit, asyncHandler((req: Request, res: Response) => {
+  router.post('/send', validateBody(agentSendMessageSchema), validateProjectExists(projectRepository), moderateRateLimit, asyncHandler(async (req: Request, res: Response) => {
     const logger = getLogger('agent-send');
     const id = req.params['id'] as string;
     const body = req.body as AgentMessageBody;
-    const { message, images } = body;
+    const { message, images, planFeedback } = body;
 
     logger.info('Received send request', {
       projectId: id,
       messageLength: message?.length ?? 0,
       hasImages: !!images && images.length > 0,
     });
+
+    // Plan approval: handle before isRunning check — agent may have exited after ExitPlanMode
+    if (planFeedback && agentManager.hasPendingPlan(id)) {
+      logger.info('Processing plan approval response', { projectId: id });
+      await agentManager.approvePlan(id, message || '');
+      res.json({ success: true });
+      return;
+    }
 
     if (!agentManager.isRunning(id)) {
       logger.warn('Agent not running', { projectId: id });
@@ -247,6 +255,11 @@ export function createAgentRouter(deps: ProjectRouterDependencies): Router {
     if (mode !== 'interactive') {
       logger.warn('Agent not in interactive mode', { projectId: id, mode });
       throw new ValidationError('Agent is not in interactive mode');
+    }
+
+    if (agentManager.hasPendingPlan(id)) {
+      logger.warn('Rejected: plan approval pending', { projectId: id });
+      throw new ValidationError('Agent is waiting for plan approval. Use the plan approval controls.');
     }
 
     logger.info('Sending input to agent', { projectId: id });

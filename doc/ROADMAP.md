@@ -5,7 +5,7 @@
 - **Phase 1: GitHub Integration** ✅ Complete
 - **Phase 2: Run Configurations** ✅ Complete
 - **Phase 3: Docker Sandboxed Execution** 🔄 In Progress (3.1-3.4 backend done, UI remaining)
-- **Phase 4: Slack Integration** 🔄 Not Started
+- **Phase 4: Slack Integration** 🔄 In Progress (4.1–4.4 done)
 - **Phase 5: Advanced Agent Orchestration** 🔄 Not Started
 - **Phase 6: Collaboration & Sharing** 🔄 Not Started
 - **Phase 7: Observability & Analytics** 🔄 Not Started
@@ -136,37 +136,37 @@ Integrate with Slack to send agent notifications, receive commands, and share pr
 
 ### Milestone 4.1: Slack App Configuration & Service Layer
 
-- [ ] Create `SlackService` interface wrapping Slack Web API calls (`@slack/web-api`) for messaging, channels, and user lookup
-- [ ] Create `SlackSocketService` interface wrapping Slack Socket Mode (`@slack/socket-mode`) for receiving slash commands and interactive events
-- [ ] Add Slack settings in Settings UI: Bot Token, App Token, default notification channel, enable/disable toggle
-- [ ] Add `GET /api/integrations/slack/status` endpoint returning connection state, workspace name, and bot user info
-- [ ] Implement token validation on save (call `auth.test`) with clear error messages for invalid or insufficient scopes
-- [ ] Add unit tests for `SlackService` methods with mocked API responses
+- [x] Create `SlackService` interface wrapping Slack Web API calls (`@slack/web-api`) for messaging, channels, and user lookup
+- [x] Create `SlackSocketService` interface wrapping Slack Socket Mode (`@slack/socket-mode`) for receiving slash commands and interactive events
+- [x] Add Slack settings in Settings UI: Bot Token, App Token, default notification channel, enable/disable toggle
+- [x] Add `GET /api/integrations/slack/status` endpoint returning connection state, workspace name, and bot user info
+- [x] Implement token validation on save (call `auth.test`) with clear error messages for invalid or insufficient scopes
+- [x] Add unit tests for `SlackService` methods with mocked API responses
 
 ### Milestone 4.2: Agent Event Notifications
 
-- [ ] Define `SlackNotificationConfig` interface with fields: `channelId`, `events` (array of event types to notify on), `mentionUsers` (array of Slack user IDs), `threadReplies` (boolean)
-- [ ] Add per-project Slack notification settings in project settings UI with channel picker and event type checkboxes
-- [ ] Send Slack messages on key agent events: task completed, task failed, agent waiting for input, Ralph Loop iteration complete
-- [ ] Format notifications as rich Slack Block Kit messages with project name, task summary, status badge, and "Open in Claudito" link
-- [ ] Support thread-based updates: first notification creates a thread, subsequent events for the same task reply in-thread
-- [ ] Add unit tests for notification formatting and event-to-channel routing logic
+- [x] Define `SlackNotificationConfig` interface with fields: `channelId`, `events` (array of event types to notify on), `mentionUsers` (array of Slack user IDs), `threadReplies` (boolean)
+- [x] Add per-project Slack notification settings in project settings UI with channel picker and event type checkboxes
+- [x] Send Slack messages on key agent events: task completed, task failed, agent waiting for input, Ralph Loop iteration complete
+- [x] Format notifications as rich Slack Block Kit messages with project name, task summary, status badge, and "Open in Claudito" link
+- [x] Support thread-based updates: first notification creates a thread, subsequent events for the same task reply in-thread
+- [x] Add unit tests for notification formatting and event-to-channel routing logic
 
 ### Milestone 4.3: Slash Commands & Interactive Actions
 
-- [ ] Register `/claudito` slash command handler via Socket Mode to accept commands like `/claudito status`, `/claudito start <project> <prompt>`, `/claudito stop <project>`
-- [ ] Implement `/claudito status` returning a summary of all running agents across projects with inline action buttons
-- [ ] Implement `/claudito start <project> <prompt>` to start an agent session from Slack, streaming key events back as thread replies
-- [ ] Add interactive button actions on notifications: "Stop Agent", "View Conversation", "Approve" / "Reject" (for plan mode)
-- [ ] Handle Slack acknowledgement timeouts correctly (respond within 3s, use `response_url` for deferred replies)
+- [x] Register `/claudito` slash command handler via Socket Mode to accept commands like `/claudito status`, `/claudito start <project> <prompt>`, `/claudito stop <project>`
+- [x] Implement `/claudito status` returning a summary of all running agents across projects with inline action buttons
+- [x] Implement `/claudito start <project> <prompt>` to start an agent session from Slack, streaming key events back as thread replies
+- [x] Add interactive button actions on notifications: "Stop Agent", "View Conversation", "Approve" / "Reject" (for plan mode)
+- [x] Handle Slack acknowledgement timeouts correctly (respond within 3s, use `response_url` for deferred replies)
 
 ### Milestone 4.4: Channel-Based Project Feeds
 
-- [ ] Add `POST /api/integrations/slack/link` to associate a Slack channel with a Claudito project (stored in project `status.json`)
-- [ ] Implement automatic posting of conversation summaries to linked channels when agent sessions complete
-- [ ] Post roadmap progress updates (milestone completion, phase transitions) to linked channels with progress bar visualization
-- [ ] Add `/claudito link` and `/claudito unlink` slash commands to manage channel-project associations from Slack
-- [ ] Include conversation statistics (duration, messages, tool calls, tokens) in completion summaries
+- [x] Add `POST /api/integrations/slack/link` to associate a Slack channel with a Claudito project (stored in project `status.json`)
+- [x] Implement automatic posting of conversation summaries to linked channels when agent sessions complete
+- [x] Post roadmap progress updates (milestone completion, phase transitions) to linked channels with progress bar visualization
+- [x] Add `/claudito link` and `/claudito unlink` slash commands to manage channel-project associations from Slack
+- [x] Include conversation statistics (duration, messages, tool calls, tokens) in completion summaries
 
 ## Phase 5: Advanced Agent Orchestration
 

@@ -154,6 +154,7 @@
     },
     gitContextTarget: null, // { path, type, status } for git context menu
     activePromptType: null, // 'question' | 'permission' | 'plan_mode' | null - blocks input while prompt is active
+    planFeedbackPending: false, // Next message should be sent as plan feedback (after clicking "Request Changes")
     pendingMessageBeforeQuestion: null, // Stores input text that was cleared when Claude asked a question
     justAnsweredQuestion: false, // Flag to prevent auto-restoring messages right after answering a question
     isGitOperating: false, // Blocks git UI during operations
@@ -763,12 +764,23 @@
     }
   }
 
+  function updateSlackButtonVisibility() {
+    var slackEnabled = state.settings && state.settings.slack && state.settings.slack.enabled === true;
+
+    if (state.selectedProjectId && slackEnabled) {
+      $('#btn-project-slack').removeClass('hidden');
+    } else {
+      $('#btn-project-slack').addClass('hidden');
+    }
+  }
+
   // Project detail rendering
   function renderProjectDetail(project) {
     if (!project) {
       $('#project-detail').addClass('hidden');
       $('#empty-state').removeClass('hidden');
       $('#btn-project-mcp').addClass('hidden');
+      $('#btn-project-slack').addClass('hidden');
       renderProjectOverview();
       return;
     }
@@ -776,6 +788,7 @@
     $('#empty-state').addClass('hidden');
     $('#project-detail').removeClass('hidden');
     $('#btn-project-mcp').removeClass('hidden');
+    updateSlackButtonVisibility();
 
     $('#project-name').text(project.name);
 
@@ -1378,6 +1391,10 @@
         loadGitHubStatus();
       }
 
+      if (tabName === 'slack') {
+        loadSlackStatus();
+      }
+
       if (tabName === 'docker' && typeof DockerModule !== 'undefined') {
         DockerModule.onSettingsTabOpen();
       }
@@ -1386,6 +1403,11 @@
     // GitHub tab - Refresh button
     $('#btn-refresh-github-status').on('click', function() {
       loadGitHubStatus();
+    });
+
+    // Slack tab handlers
+    $('#btn-check-slack-status').on('click', function() {
+      loadSlackStatus();
     });
 
     // Wipe All Data - open confirmation modal
@@ -1685,10 +1707,14 @@
         // Store settings for templates module
         state.settings = settings;
         PromptTemplatesModule.renderSettingsTab();
+        updateSlackButtonVisibility();
 
         // MCP settings
         $('#input-mcp-enabled').prop('checked', settings.mcp?.enabled !== false);
         McpSettingsModule.renderMcpServers();
+
+        // Slack settings
+        loadSlackSettingsFields(settings.slack);
 
         // Chrome state
         state.chromeEnabled = settings.chromeEnabled ?? false;
@@ -1737,6 +1763,43 @@
 
     return '<span class="inline-block w-2 h-2 rounded-full bg-green-500 mr-1.5 align-middle"></span>' +
       '<span class="align-middle">gh ' + status.version + ' &mdash; ' + status.username + '</span>';
+  }
+
+  function loadSlackSettingsFields(slack) {
+    $('#input-slack-enabled').prop('checked', slack && slack.enabled === true);
+    $('#input-slack-bot-token').val((slack && slack.botToken) ? '••••••••' : '');
+    $('#input-slack-bot-token').data('has-saved-token', !!(slack && slack.botToken));
+    $('#input-slack-app-token').val((slack && slack.appToken) ? '••••••••' : '');
+    $('#input-slack-app-token').data('has-saved-app-token', !!(slack && slack.appToken));
+    $('#input-slack-default-channel').val((slack && slack.defaultChannelId) || '');
+  }
+
+  function loadSlackStatus() {
+    var $indicator = $('#slack-status-indicator');
+    $indicator.text('Checking...');
+
+    $.get('/api/integrations/slack/status')
+      .done(function(status) {
+        $indicator.html(renderSlackStatus(status));
+      })
+      .fail(function() {
+        $indicator.html(
+          '<span class="inline-block w-2 h-2 rounded-full bg-gray-500 mr-1.5 align-middle"></span>' +
+          '<span class="align-middle">Unable to check Slack status</span>'
+        );
+      });
+  }
+
+  function renderSlackStatus(status) {
+    if (!status.connected) {
+      var errorMsg = status.error || 'Not connected';
+
+      return '<span class="inline-block w-2 h-2 rounded-full bg-red-500 mr-1.5 align-middle"></span>' +
+        '<span class="align-middle">' + escapeHtml(errorMsg) + '</span>';
+    }
+
+    return '<span class="inline-block w-2 h-2 rounded-full bg-green-500 mr-1.5 align-middle"></span>' +
+      '<span class="align-middle">Connected to <strong>' + escapeHtml(status.workspaceName || '') + '</strong> as ' + escapeHtml(status.botUserName || '') + '</span>';
   }
 
   function checkGitHubAvailable() {
@@ -1886,6 +1949,24 @@
       docker: typeof DockerModule !== 'undefined' ? DockerModule.collectSettingsFields() : undefined
     };
 
+    // Collect Slack settings with placeholder detection
+    var slackBotToken = $('#input-slack-bot-token').val().trim();
+    var slackAppToken = $('#input-slack-app-token').val().trim();
+    var slack = {
+      enabled: $('#input-slack-enabled').is(':checked'),
+      defaultChannelId: $('#input-slack-default-channel').val().trim()
+    };
+
+    if (slackBotToken !== '••••••••') {
+      slack.botToken = slackBotToken;
+    }
+
+    if (slackAppToken !== '••••••••') {
+      slack.appToken = slackAppToken;
+    }
+
+    settings.slack = slack;
+
     // Request notification permission if enabling notifications
     if (enableDesktopNotifications && 'Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission();
@@ -1905,6 +1986,11 @@
         updateRunningCount();
         updateInputHint();
         updateChromeToggleButton();
+        updateSlackButtonVisibility();
+
+        if (updated.slack) {
+          loadSlackSettingsFields(updated.slack);
+        }
 
         if (typeof PermissionModeModule !== 'undefined') {
           PermissionModeModule.updateSkipPermissionsWarning();
@@ -2406,6 +2492,16 @@
       }
     });
 
+    // Slack Notifications button
+    $('#btn-project-slack').on('click', function() {
+      if (state.selectedProjectId) {
+        var project = findProjectById(state.selectedProjectId);
+        if (project) {
+          SlackProjectModule.openSlackModal(state.selectedProjectId, project.name);
+        }
+      }
+    });
+
     $('#btn-toggle-chrome').on('click', function() {
       state.chromeEnabled = !state.chromeEnabled;
       updateChromeToggleButton();
@@ -2446,6 +2542,7 @@
         api.writeFile(filePath, template)
           .done(function() {
             showToast(fileName + ' created', 'success');
+            TaskDisplayModule.loadOptimizationsBadge(state.selectedProjectId);
 
             // Refresh file browser if project files tab is active
             if (state.activeTab === 'project-files') {
@@ -2472,6 +2569,7 @@
                     api.writeFile(filePath, template)
                       .done(function() {
                         showToast(fileName + ' created', 'success');
+                        TaskDisplayModule.loadOptimizationsBadge(state.selectedProjectId);
 
                         if (state.activeTab === 'project-files') {
                           var project = findProjectById(state.selectedProjectId);
@@ -2676,6 +2774,9 @@
       // Clear prompt blocking so user can type feedback
       setPromptBlockingState(null);
 
+      // Mark next send as plan feedback so the server accepts it
+      state.planFeedbackPending = true;
+
       // Focus the input field so user can type their feedback
       var $input = $('#agent-input');
       $input.focus();
@@ -2872,7 +2973,7 @@
   function sendPlanModeResponse(response) {
     if (!state.selectedProjectId) return;
 
-    api.sendAgentMessage(state.selectedProjectId, response)
+    api.sendAgentMessage(state.selectedProjectId, response, null, true)
       .fail(function(xhr) {
         console.error('Failed to send plan mode response:', xhr);
         showToast('Failed to send response', 'error');
@@ -3201,7 +3302,10 @@
     ImageAttachmentModule.showWaitingIndicator();
     updateCancelButton();
 
-    api.sendAgentMessage(state.selectedProjectId, message, images)
+    var isPlanFeedback = state.planFeedbackPending;
+    state.planFeedbackPending = false;
+
+    api.sendAgentMessage(state.selectedProjectId, message, images, isPlanFeedback)
       .done(function() {
         $input.val('').trigger('input');
         ImageAttachmentModule.clearAll();
@@ -6083,6 +6187,15 @@
       openModal: openModal,
       closeAllModals: closeAllModals,
       appendMessage: appendMessage
+    });
+
+    SlackProjectModule.init({
+      state: state,
+      api: api,
+      escapeHtml: escapeHtml,
+      showToast: showToast,
+      openModal: openModal,
+      closeAllModals: closeAllModals,
     });
 
     ClaudeCommandsModule.init({

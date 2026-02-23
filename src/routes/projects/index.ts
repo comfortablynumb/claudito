@@ -9,6 +9,7 @@ import { createGitRouter } from './git';
 import { createOptimizationRouter } from './optimization';
 import { createRunConfigsRouter } from './run-configs';
 import { createInventifyRouter } from './inventify';
+import { createSlackRouter } from './slack';
 
 // Re-export types for backward compatibility
 export * from './types';
@@ -33,6 +34,7 @@ export function createProjectsRouter(deps: ProjectRouterDependencies): Router {
   router.use('/:id/ralph-loop', createRalphLoopRouter(deps));
   router.use('/:id/git', createGitRouter(deps));
   router.use('/:id/run-configs', createRunConfigsRouter(deps));
+  router.use('/:id/slack', createSlackRouter(deps));
   router.use('/:id', createOptimizationRouter(deps));
 
   return router;

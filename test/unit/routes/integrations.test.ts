@@ -2,11 +2,22 @@ import express from 'express';
 import request from 'supertest';
 import { createIntegrationsRouter } from '../../../src/routes/integrations';
 import { createErrorHandler } from '../../../src/utils/errors';
-import { createMockGitHubCLIService, createMockProjectService, createMockProjectRepository, sampleGitHubRepo, sampleGitHubIssue, sampleGitHubPR } from '../helpers/mock-factories';
+import {
+  createMockGitHubCLIService,
+  createMockProjectService,
+  createMockProjectRepository,
+  createMockSettingsRepository,
+  createMockSlackService,
+  sampleGitHubRepo,
+  sampleGitHubIssue,
+  sampleGitHubPR,
+} from '../helpers/mock-factories';
 
 describe('Integrations Router', () => {
   function createApp() {
     const githubCLIService = createMockGitHubCLIService();
+    const slackService = createMockSlackService();
+    const settingsRepository = createMockSettingsRepository();
     const projectService = createMockProjectService();
     const projectRepository = createMockProjectRepository();
     const broadcastMessages: unknown[] = [];
@@ -14,12 +25,14 @@ describe('Integrations Router', () => {
     app.use(express.json());
     app.use('/integrations', createIntegrationsRouter({
       githubCLIService,
+      slackService,
+      settingsRepository,
       projectService,
       projectRepository,
       broadcast: (msg) => broadcastMessages.push(msg),
     }));
     app.use(createErrorHandler());
-    return { app, githubCLIService, projectService, projectRepository, broadcastMessages };
+    return { app, githubCLIService, slackService, settingsRepository, projectService, projectRepository, broadcastMessages };
   }
 
   describe('GET /integrations/github/status', () => {

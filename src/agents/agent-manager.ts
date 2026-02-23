@@ -87,6 +87,11 @@ export interface ImageData {
   data: string; // Base64 encoded image data
 }
 
+export interface SlackMeta {
+  source: 'slack';
+  slackUsername?: string;
+}
+
 export interface StartInteractiveAgentOptions {
   initialMessage?: string;
   images?: ImageData[];
@@ -94,6 +99,7 @@ export interface StartInteractiveAgentOptions {
   permissionMode?: 'acceptEdits' | 'plan';
   /** If true, use --session-id to create new session. If false/undefined, use --resume for existing sessions. */
   isNewSession?: boolean;
+  slackMeta?: SlackMeta;
 }
 
 export interface StartAgentResult {
@@ -117,7 +123,7 @@ export interface FullAgentStatus {
 export interface AgentManager {
   startAgent(projectId: string, instructions: string): Promise<void>;
   startInteractiveAgent(projectId: string, options?: StartInteractiveAgentOptions): Promise<StartAgentResult>;
-  sendInput(projectId: string, input: string, images?: ImageData[]): void;
+  sendInput(projectId: string, input: string, images?: ImageData[], slackMeta?: SlackMeta): void;
   sendToolResult(projectId: string, toolUseId: string, content: string): void;
   stopAgent(projectId: string): Promise<void>;
   stopAllAgents(): Promise<void>;
@@ -126,6 +132,8 @@ export interface AgentManager {
   isRunning(projectId: string): boolean;
   isQueued(projectId: string): boolean;
   isWaitingForInput(projectId: string): boolean;
+  hasPendingPlan(projectId: string): boolean;
+  approvePlan(projectId: string, response: string): Promise<void>;
   getWaitingVersion(projectId: string): number;
   getResourceStatus(): AgentResourceStatus;
   removeFromQueue(projectId: string): void;
@@ -329,6 +337,9 @@ export class DefaultAgentManager implements AgentManager {
   }
 
   async startInteractiveAgent(projectId: string, options?: StartInteractiveAgentOptions): Promise<StartAgentResult> {
+    // Clear any pending plan so manual mode switches don't leave the plan gate active
+    this.pendingPlans.delete(projectId);
+
     if (this.agents.has(projectId)) {
       throw new Error('Agent is already running for this project');
     }
@@ -438,6 +449,32 @@ export class DefaultAgentManager implements AgentManager {
     // Start agent
     agent.start(initialInstructions || '');
 
+    // Record and broadcast the initial user message (e.g. from Slack) so it appears in the browser
+    if (options?.initialMessage && options.slackMeta) {
+      const conversationId = agent.sessionId;
+
+      if (conversationId) {
+        const userMessage: AgentMessage = {
+          type: 'user',
+          content: options.initialMessage,
+          timestamp: new Date().toISOString(),
+          source: options.slackMeta.source,
+          slackUsername: options.slackMeta.slackUsername,
+        };
+
+        this.trackMessageSave(
+          this.conversationRepository.addMessage(projectId, conversationId, userMessage)
+        ).catch((err) => {
+          this.logger.error('Failed to save initial Slack message to conversation', {
+            projectId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+
+        this.emit('message', projectId, userMessage);
+      }
+    }
+
     return {
       containerRestarted: dockerResult.containerWasRecreated,
       containerImageName: dockerResult.containerImageName,
@@ -480,7 +517,7 @@ export class DefaultAgentManager implements AgentManager {
     return JSON.stringify(contentBlocks);
   }
 
-  sendInput(projectId: string, input: string, images?: ImageData[]): void {
+  sendInput(projectId: string, input: string, images?: ImageData[], slackMeta?: SlackMeta): void {
     const agent = this.agents.get(projectId);
     if (!agent) {
       throw new Error('No agent running for this project');
@@ -500,13 +537,14 @@ export class DefaultAgentManager implements AgentManager {
 
     const contentToSend = images ? this.buildMultimodalContent(input, images) : input;
 
-    // Save user message to conversation
+    // Save user message to conversation and broadcast to browser
     const conversationId = agent.sessionId;
     if (conversationId) {
       const userMessage: AgentMessage = {
         type: 'user',
         content: input, // Save original input without image data
         timestamp: new Date().toISOString(),
+        ...(slackMeta ? { source: slackMeta.source, slackUsername: slackMeta.slackUsername } : {}),
       };
 
       this.trackMessageSave(
@@ -518,6 +556,9 @@ export class DefaultAgentManager implements AgentManager {
           error: err instanceof Error ? err.message : String(err),
         });
       });
+
+      // Broadcast user message so it appears in the browser immediately
+      this.emit('message', projectId, userMessage);
     }
 
     agent.sendInput(contentToSend);
@@ -590,6 +631,16 @@ export class DefaultAgentManager implements AgentManager {
   isWaitingForInput(projectId: string): boolean {
     const agent = this.agents.get(projectId);
     return agent ? agent.isWaitingForInput : false;
+  }
+
+  hasPendingPlan(projectId: string): boolean {
+    return this.pendingPlans.has(projectId);
+  }
+
+  async approvePlan(projectId: string, response: string): Promise<void> {
+    const pendingPlan = this.pendingPlans.get(projectId);
+    if (!pendingPlan) return;
+    await this.handlePlanApprovalResponse(projectId, response, pendingPlan);
   }
 
   getWaitingVersion(projectId: string): number {
@@ -1361,6 +1412,20 @@ export class DefaultAgentManager implements AgentManager {
       },
     };
     this.emit('message', projectId, planModeMessage);
+
+    // Persist plan_mode message so it survives project switches
+    const conversationId = agent.sessionId;
+    if (conversationId) {
+      this.trackMessageSave(
+        this.conversationRepository.addMessage(projectId, conversationId, planModeMessage)
+      ).catch((err) => {
+        this.logger.error('Failed to save plan_mode message to conversation', {
+          projectId,
+          conversationId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
 
     // Mark agent as waiting for input
     const waitingVersion = Date.now();

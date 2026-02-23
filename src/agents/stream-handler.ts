@@ -182,6 +182,9 @@ export class StreamHandler extends EventEmitter {
     'result': (event) => this.handleResult(event),
     'session_not_found': (event) => this.handleSessionNotFound(event),
     'status_change': (event) => this.handleStatusChange(event),
+    'rate_limit_event': (event) => this.logger.info('Rate limit event received', {
+      retryAfterMs: (event as unknown as { retry_after_ms?: number }).retry_after_ms,
+    }),
   };
 
   /**

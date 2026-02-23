@@ -86,6 +86,12 @@ export const DEFAULT_TEST_SETTINGS: GlobalSettings = {
     enabled: true,
     servers: [],
   },
+  slack: {
+    enabled: false,
+    botToken: '',
+    appToken: '',
+    defaultChannelId: '',
+  },
   chromeEnabled: false,
   inventifyFolder: '',
   docker: {
@@ -407,6 +413,20 @@ export function createMockProjectRepository(
       const existed = projects.has(id);
       projects.delete(id);
       return Promise.resolve(existed);
+    }),
+    updateSlackNotification: jest.fn().mockImplementation((id: string, config: unknown) => {
+      const project = projects.get(id);
+      if (!project) return Promise.resolve(null);
+      (project as ProjectStatus).slackNotification = config as ProjectStatus['slackNotification'];
+      project.updatedAt = new Date().toISOString();
+      return Promise.resolve({ ...project });
+    }),
+    updateSlackLinkedChannel: jest.fn().mockImplementation((id: string, channelId: string | null) => {
+      const project = projects.get(id);
+      if (!project) return Promise.resolve(null);
+      project.slackLinkedChannelId = channelId ?? undefined;
+      project.updatedAt = new Date().toISOString();
+      return Promise.resolve({ ...project });
     }),
     // Extra method for path resolution
     getProjectPath: jest.fn().mockImplementation((id: string) => {
@@ -994,6 +1014,8 @@ export function createMockAgentManager(): jest.Mocked<AgentManager> {
       return queuedProjects.some((q) => q.projectId === projectId);
     }),
     isWaitingForInput: jest.fn().mockReturnValue(false),
+    hasPendingPlan: jest.fn().mockReturnValue(false),
+    approvePlan: jest.fn().mockResolvedValue(undefined),
     getWaitingVersion: jest.fn().mockReturnValue(0),
     getResourceStatus: jest.fn().mockImplementation(() => ({
       runningCount: runningAgents.size,
@@ -1183,6 +1205,28 @@ export function createMockCommandRunner(): jest.Mocked<CommandRunner> {
   return {
     exec: jest.fn().mockResolvedValue({ stdout: '', stderr: '' }),
     spawn: jest.fn().mockReturnValue(new EventEmitter() as any),
+  };
+}
+
+import { SlackService, SlackStatus } from '../../../src/services/slack-service';
+
+export function createMockSlackService(): jest.Mocked<SlackService> {
+  const defaultStatus: SlackStatus = {
+    connected: false,
+    workspaceName: null,
+    botUserId: null,
+    botUserName: null,
+    error: 'No bot token configured',
+  };
+
+  return {
+    getStatus: jest.fn().mockResolvedValue(defaultStatus),
+    validateBotToken: jest.fn().mockResolvedValue({ valid: true, error: null, workspaceName: 'Test', botUserId: 'U1' }),
+    sendMessage: jest.fn().mockResolvedValue('ts-123'),
+    replyInThread: jest.fn().mockResolvedValue('1234567890.000100'),
+    updateMessage: jest.fn().mockResolvedValue(undefined),
+    listChannels: jest.fn().mockResolvedValue([]),
+    getUserName: jest.fn().mockResolvedValue(null),
   };
 }
 

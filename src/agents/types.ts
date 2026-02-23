@@ -79,6 +79,8 @@ export interface AgentMessage {
   resultInfo?: ResultInfo;
   statusChangeInfo?: StatusChangeInfo;
   ralphLoopPhase?: 'worker' | 'reviewer';
+  source?: 'browser' | 'slack';
+  slackUsername?: string;
 }
 
 export interface ProcessInfo {

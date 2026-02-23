@@ -1550,6 +1550,19 @@ body {
   background-color: #1f2937;
 }
 
+/* Project tab bar — always scrollable */
+#project-tab-bar {
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+
+#project-tab-bar::-webkit-scrollbar { height: 4px; }
+#project-tab-bar::-webkit-scrollbar-track { background: #1f2937; }
+#project-tab-bar::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 2px; }
+#project-tab-bar .tab-button { flex-shrink: 0; }
+
 /* Project detail layout - ensure proper overflow handling */
 #project-detail {
   min-height: 0; /* Important for flex children to shrink properly */
@@ -2523,20 +2536,24 @@ body {
   }
 }
 
-/* Settings modal tab scrolling */
+/* Settings modal tab scrolling — always scrollable */
 .settings-tab-container {
   position: relative;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+
+.settings-tab-container > .flex {
+  flex-wrap: nowrap;
+  min-width: max-content;
+}
+
+.settings-tab {
+  flex-shrink: 0;
 }
 
 @media (max-width: 768px) {
-  /* Tab container wrapper */
-  .settings-tab-container {
-    overflow-x: auto;
-    scrollbar-width: thin;
-    -webkit-overflow-scrolling: touch;
-    position: relative;
-  }
-
   .settings-tab-container::-webkit-scrollbar {
     height: 4px;
   }
@@ -2548,18 +2565,6 @@ body {
   .settings-tab-container::-webkit-scrollbar-thumb {
     background: #6b7280;
     border-radius: 2px;
-  }
-
-  /* Tabs should not wrap */
-  .settings-tab-container > .flex {
-    flex-wrap: nowrap;
-    min-width: max-content;
-  }
-
-  /* Individual tab styling */
-  .settings-tab {
-    flex-shrink: 0;
-    white-space: nowrap;
   }
 
   /* Scroll indicators */
@@ -2651,11 +2656,27 @@ body {
 
   /* Conversation toolbar adjustments */
   #conversation-toolbar {
-    flex-wrap: wrap;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    scrollbar-width: none;
   }
 
+  #conversation-toolbar::-webkit-scrollbar { display: none; }
+
   #conversation-toolbar > div {
-    flex-wrap: wrap;
+    flex-shrink: 0;
+    flex-wrap: nowrap;
+  }
+
+  #conversation-toolbar > div > * {
+    flex-shrink: 0;
+  }
+
+  #conversation-toolbar > div:first-child {
+    margin-right: 0.5rem;
+    padding-right: 0.5rem;
+    border-right: 1px solid #374151;
   }
 
   /* Mobile file browser - show list first, then content full width */

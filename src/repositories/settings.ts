@@ -246,6 +246,17 @@ export interface McpSettings {
   servers: McpServerConfig[];    // Server configurations
 }
 
+export interface SlackSettings {
+  /** Bot Token (xoxb-...) for Slack Web API */
+  botToken: string;
+  /** App Token (xapp-...) for Slack Socket Mode */
+  appToken: string;
+  /** Default channel ID for notifications */
+  defaultChannelId: string;
+  /** Master enable/disable toggle */
+  enabled: boolean;
+}
+
 export interface GlobalSettings {
   maxConcurrentAgents: number;
   claudePermissions: ClaudePermissions;
@@ -265,6 +276,8 @@ export interface GlobalSettings {
   ralphLoop: RalphLoopSettings;
   /** MCP (Model Context Protocol) server configurations */
   mcp: McpSettings;
+  /** Slack integration settings */
+  slack: SlackSettings;
   /** Enable Chrome browser usage in Claude agents */
   chromeEnabled: boolean;
   /** Base directory for Inventify-generated projects */
@@ -370,6 +383,12 @@ Your goal is to ensure high-quality deliverables. Be thorough but fair in your a
     enabled: true,
     servers: [],
   },
+  slack: {
+    enabled: false,
+    botToken: '',
+    appToken: '',
+    defaultChannelId: '',
+  },
   chromeEnabled: false,
   inventifyFolder: '',
   docker: {
@@ -395,6 +414,7 @@ export interface SettingsUpdate {
   promptTemplates?: PromptTemplate[];
   ralphLoop?: Partial<RalphLoopSettings>;
   mcp?: Partial<McpSettings>;
+  slack?: Partial<SlackSettings>;
   chromeEnabled?: boolean;
   inventifyFolder?: string;
   docker?: Partial<DockerSettings>;
@@ -494,6 +514,7 @@ export class FileSettingsRepository implements SettingsRepository {
     const parsedStreaming = parsed.agentStreaming;
     const parsedRalphLoop = parsed.ralphLoop;
     const parsedMcp = parsed.mcp;
+    const parsedSlack = parsed.slack;
     const parsedDocker = parsed.docker;
 
     return {
@@ -532,6 +553,12 @@ export class FileSettingsRepository implements SettingsRepository {
       mcp: {
         enabled: parsedMcp?.enabled ?? DEFAULT_SETTINGS.mcp.enabled,
         servers: parsedMcp?.servers ?? DEFAULT_SETTINGS.mcp.servers,
+      },
+      slack: {
+        enabled: parsedSlack?.enabled ?? DEFAULT_SETTINGS.slack.enabled,
+        botToken: parsedSlack?.botToken ?? DEFAULT_SETTINGS.slack.botToken,
+        appToken: parsedSlack?.appToken ?? DEFAULT_SETTINGS.slack.appToken,
+        defaultChannelId: parsedSlack?.defaultChannelId ?? DEFAULT_SETTINGS.slack.defaultChannelId,
       },
       chromeEnabled: parsed.chromeEnabled ?? DEFAULT_SETTINGS.chromeEnabled,
       inventifyFolder: parsed.inventifyFolder ?? DEFAULT_SETTINGS.inventifyFolder,
@@ -638,6 +665,13 @@ export class FileSettingsRepository implements SettingsRepository {
       this.settings.mcp = {
         ...this.settings.mcp,
         ...updates.mcp,
+      };
+    }
+
+    if (updates.slack) {
+      this.settings.slack = {
+        ...this.settings.slack,
+        ...updates.slack,
       };
     }
 

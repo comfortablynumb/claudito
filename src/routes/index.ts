@@ -30,6 +30,10 @@ import { RunProcessManager } from '../services/run-config/run-process-types';
 import { createGitService } from '../services/git-service';
 import { createShellService, ShellService } from '../services/shell-service';
 import { createGitHubCLIService, GitHubCLIService } from '../services/github-cli-service';
+import { createSlackService, SlackService, createSlackSocketService, SlackSocketService } from '../services/slack-service';
+import { createSlackNotificationService, SlackNotificationService } from '../services/slack-notification-service';
+import { createSlackCommandService } from '../services/slack-command-service';
+import { DefaultSlackThreadTracker, SlackThreadTracker } from '../services/slack-thread-tracker';
 import { createIntegrationsRouter } from './integrations';
 import { DefaultAgentManager, AgentManager } from '../agents';
 import { DefaultDockerService, DefaultContainerManager, DefaultDockerCommandRunner, DefaultImageManager } from '../services/docker';
@@ -58,6 +62,10 @@ let sharedWebSocketServer: ProjectWebSocketServer | null = null;
 let sharedProjectDiscoveryService: ProjectDiscoveryService | null = null;
 let sharedOptimizationService: ClaudeOptimizationService | null = null;
 let sharedGitHubCLIService: GitHubCLIService | null = null;
+let sharedSlackService: SlackService | null = null;
+let sharedSlackSocketService: SlackSocketService | null = null;
+let sharedSlackNotificationService: SlackNotificationService | null = null;
+let sharedThreadTracker: SlackThreadTracker | null = null;
 let sharedRunConfigurationService: RunConfigurationService | null = null;
 let sharedRunProcessManager: RunProcessManager | null = null;
 let sharedInventifyService: InventifyService | null = null;
@@ -115,6 +123,9 @@ export function createApiRouter(deps: ApiRouterDependencies = {}): Router {
     containerManager,
     maxConcurrentAgents: deps.maxConcurrentAgents,
   });
+
+  // Slack notification service (subscribes to agent events)
+  getOrCreateSlackNotificationService(agentManager, settingsRepository, projectRepository);
 
   // Claude CLI info (eagerly fetch and cache on startup)
   const cliLogger = getLogger('claude-cli');
@@ -261,6 +272,7 @@ export function createApiRouter(deps: ApiRouterDependencies = {}): Router {
   router.use('/settings', createSettingsRouter({
     settingsRepository,
     dataWipeService,
+    slackService: getOrCreateSlackService(),
     onSettingsChange: (event) => {
       if (event.maxConcurrentAgents !== undefined) {
         agentManager.setMaxConcurrentAgents(event.maxConcurrentAgents);
@@ -272,13 +284,22 @@ export function createApiRouter(deps: ApiRouterDependencies = {}): Router {
           console.error('Failed to restart agents after settings change:', error);
         });
       }
+
+      if (event.slackChanged) {
+        initSlackSocketService(settingsRepository, projectRepository, agentManager).catch((error) => {
+          getLogger('slack').error('Failed to re-initialize Slack socket service', { error: error instanceof Error ? error.message : String(error) });
+        });
+      }
     },
   }));
 
   // Integrations
   const githubCLIService = getOrCreateGitHubCLIService();
+  const slackService = getOrCreateSlackService();
   router.use('/integrations', createIntegrationsRouter({
     githubCLIService,
+    slackService,
+    settingsRepository,
     projectService,
     projectRepository,
     broadcast: (message) => {
@@ -352,6 +373,11 @@ export function createApiRouter(deps: ApiRouterDependencies = {}): Router {
     runConfigImportService,
     inventifyService,
   }));
+
+  // Connect Slack Socket Mode on startup (no-op if not configured)
+  initSlackSocketService(settingsRepository, projectRepository, agentManager).catch((error) => {
+    getLogger('slack').error('Failed to initialize Slack socket service', { error: error instanceof Error ? error.message : String(error) });
+  });
 
   return router;
 }
@@ -472,6 +498,79 @@ function getOrCreateGitHubCLIService(): GitHubCLIService {
 
 export function getGitHubCLIService(): GitHubCLIService | null {
   return sharedGitHubCLIService;
+}
+
+function getOrCreateSlackService(): SlackService {
+  if (!sharedSlackService) {
+    sharedSlackService = createSlackService();
+  }
+
+  return sharedSlackService;
+}
+
+export function getSlackService(): SlackService | null {
+  return sharedSlackService;
+}
+
+function getOrCreateThreadTracker(): SlackThreadTracker {
+  if (!sharedThreadTracker) {
+    sharedThreadTracker = new DefaultSlackThreadTracker();
+  }
+
+  return sharedThreadTracker;
+}
+
+function getOrCreateSlackNotificationService(
+  agentManager: AgentManager,
+  settingsRepository: FileSettingsRepository,
+  projectRepository: FileProjectRepository,
+): SlackNotificationService {
+  if (!sharedSlackNotificationService) {
+    const ralphLoopService = sharedRalphLoopService;
+    sharedSlackNotificationService = createSlackNotificationService({
+      agentManager,
+      slackService: getOrCreateSlackService(),
+      settingsRepository,
+      projectRepository,
+      ralphLoopService,
+      threadTracker: getOrCreateThreadTracker(),
+    });
+    sharedSlackNotificationService.start();
+  }
+
+  return sharedSlackNotificationService;
+}
+
+export function getSlackNotificationService(): SlackNotificationService | null {
+  return sharedSlackNotificationService;
+}
+
+export async function initSlackSocketService(settingsRepository: FileSettingsRepository, projectRepository: FileProjectRepository, agentManager: AgentManager): Promise<void> {
+  const settings = await settingsRepository.get();
+
+  if (!settings.slack?.enabled || !settings.slack.appToken) {
+    return;
+  }
+
+  if (!sharedSlackSocketService) {
+    sharedSlackSocketService = createSlackSocketService();
+  }
+
+  const commandService = createSlackCommandService({
+    agentManager,
+    slackService: getOrCreateSlackService(),
+    slackSocketService: sharedSlackSocketService,
+    projectRepository,
+    settingsRepository,
+    threadTracker: getOrCreateThreadTracker(),
+  });
+
+  commandService.register();
+  await sharedSlackSocketService.connect(settings.slack.appToken);
+}
+
+export function getSlackSocketService(): SlackSocketService | null {
+  return sharedSlackSocketService;
 }
 
 function getOrCreateOptimizationService(

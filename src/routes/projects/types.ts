@@ -91,6 +91,7 @@ export interface AgentMessageBody {
   images?: ImageData[];
   sessionId?: string;
   permissionMode?: 'acceptEdits' | 'plan';
+  planFeedback?: boolean;
 }
 
 export interface RenameConversationBody {

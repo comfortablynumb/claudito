@@ -8,6 +8,8 @@ import {
   IssueCreateOptions,
   PRListOptions,
 } from '../services/github-cli-service';
+import { SlackService } from '../services/slack-service';
+import { SettingsRepository } from '../repositories';
 import { ProjectService } from '../services/project';
 import { ProjectRepository } from '../repositories';
 import { asyncHandler, ValidationError } from '../utils/errors';
@@ -15,6 +17,8 @@ import { WebSocketMessage } from '../websocket/websocket-server';
 
 export interface IntegrationsRouterDependencies {
   githubCLIService: GitHubCLIService;
+  slackService: SlackService;
+  settingsRepository: SettingsRepository;
   projectService: ProjectService;
   projectRepository: ProjectRepository;
   broadcast?: (message: WebSocketMessage) => void;
@@ -22,7 +26,7 @@ export interface IntegrationsRouterDependencies {
 
 export function createIntegrationsRouter(deps: IntegrationsRouterDependencies): Router {
   const router = Router();
-  const { githubCLIService, projectService, projectRepository, broadcast } = deps;
+  const { githubCLIService, slackService, settingsRepository, projectService, projectRepository, broadcast } = deps;
 
   router.get('/github/status', asyncHandler(async (_req, res) => {
     const status = await githubCLIService.getStatus();
@@ -360,6 +364,104 @@ export function createIntegrationsRouter(deps: IntegrationsRouterDependencies): 
 
     await githubCLIService.mergePR(repo, prNumber, method);
     res.json({ success: true });
+  }));
+
+  // ============================================================================
+  // Slack routes
+  // ============================================================================
+
+  router.get('/slack/status', asyncHandler(async (_req, res) => {
+    const settings = await settingsRepository.get();
+    const botToken = settings.slack?.botToken || null;
+    const status = await slackService.getStatus(botToken);
+    res.json(status);
+  }));
+
+  router.post('/slack/validate', asyncHandler(async (req, res) => {
+    const { botToken } = req.body as { botToken?: string };
+
+    if (!botToken) {
+      throw new ValidationError('botToken is required');
+    }
+
+    const result = await slackService.validateBotToken(botToken);
+    res.json(result);
+  }));
+
+  router.get('/slack/channels', asyncHandler(async (_req, res) => {
+    const settings = await settingsRepository.get();
+    const botToken = settings.slack?.botToken;
+
+    if (!botToken) {
+      throw new ValidationError('No Slack bot token configured');
+    }
+
+    const channels = await slackService.listChannels(botToken);
+    res.json(channels);
+  }));
+
+  router.post('/slack/link', asyncHandler(async (req, res) => {
+    const { projectId, channelId } = req.body as { projectId?: string; channelId?: string };
+
+    if (!projectId) {
+      throw new ValidationError('projectId is required');
+    }
+
+    if (!channelId) {
+      throw new ValidationError('channelId is required');
+    }
+
+    const project = await projectRepository.findById(projectId);
+
+    if (!project) {
+      res.status(404).json({ error: 'Project not found' });
+      return;
+    }
+
+    await projectRepository.updateSlackLinkedChannel(projectId, channelId);
+    res.json({ success: true, channelId });
+  }));
+
+  router.delete('/slack/link/:projectId', asyncHandler(async (req, res) => {
+    const projectId = req.params['projectId']!;
+    const project = await projectRepository.findById(projectId);
+
+    if (!project) {
+      res.status(404).json({ error: 'Project not found' });
+      return;
+    }
+
+    await projectRepository.updateSlackLinkedChannel(projectId, null);
+    res.json({ success: true });
+  }));
+
+  router.put('/slack/settings', asyncHandler(async (req, res) => {
+    const { botToken, appToken, defaultChannelId, enabled } = req.body as {
+      botToken?: string;
+      appToken?: string;
+      defaultChannelId?: string;
+      enabled?: boolean;
+    };
+
+    // Validate bot token if provided and non-empty
+    if (botToken && botToken.trim()) {
+      const validation = await slackService.validateBotToken(botToken.trim());
+
+      if (!validation.valid) {
+        throw new ValidationError('Invalid bot token: ' + (validation.error ?? 'authentication failed'));
+      }
+    }
+
+    const updated = await settingsRepository.update({
+      slack: {
+        ...(botToken !== undefined && { botToken: botToken.trim() }),
+        ...(appToken !== undefined && { appToken: appToken.trim() }),
+        ...(defaultChannelId !== undefined && { defaultChannelId }),
+        ...(enabled !== undefined && { enabled }),
+      },
+    });
+
+    res.json(updated.slack);
   }));
 
   return router;

@@ -249,10 +249,18 @@
    * Render a user message
    */
   function renderUserMessage(msg) {
+    var isSlack = msg.source === 'slack';
+    var senderName = isSlack
+      ? ('Slack' + (msg.slackUsername ? ': @' + msg.slackUsername : ''))
+      : 'You';
+    var iconHtml = isSlack
+      ? '<span class="message-icon" title="From Slack">💬</span>'
+      : getUserIcon();
+
     var html = '<div class="conversation-message user" data-msg-type="user">' +
       '<div class="message-header">' +
-      getUserIcon() +
-      '<span class="message-sender">You</span>' +
+      iconHtml +
+      '<span class="message-sender">' + senderName + '</span>' +
       formatTimestamp(msg.timestamp) +
       '</div>';
 

@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
-import { SettingsRepository, ClaudePermissions, PromptTemplate, McpServerConfig } from '../repositories';
+import { SettingsRepository, ClaudePermissions, PromptTemplate, McpServerConfig, SlackSettings } from '../repositories';
 import { DataWipeService } from '../services/data-wipe-service';
+import { SlackService } from '../services/slack-service';
 import { DockerSettings } from '../services/docker/types';
 import { asyncHandler, ValidationError } from '../utils';
 import { SUPPORTED_MODELS, MODEL_DISPLAY_NAMES } from '../config/models';
@@ -18,6 +19,7 @@ interface UpdateSettingsBody {
     enabled?: boolean;
     servers?: McpServerConfig[];
   };
+  slack?: Partial<SlackSettings>;
   chromeEnabled?: boolean;
   inventifyFolder?: string;
   docker?: Partial<DockerSettings>;
@@ -27,11 +29,13 @@ export interface SettingsChangeEvent {
   maxConcurrentAgents?: number;
   appendSystemPromptChanged?: boolean;
   mcpChanged?: boolean;
+  slackChanged?: boolean;
 }
 
 export interface SettingsRouterDependencies {
   settingsRepository: SettingsRepository;
   dataWipeService: DataWipeService;
+  slackService?: SlackService;
   onSettingsChange?: (event: SettingsChangeEvent) => void;
 }
 
@@ -71,7 +75,7 @@ function validateMcpServers(servers: McpServerConfig[]): void {
 
 export function createSettingsRouter(deps: SettingsRouterDependencies): Router {
   const router = Router();
-  const { settingsRepository, dataWipeService, onSettingsChange } = deps;
+  const { settingsRepository, dataWipeService, slackService, onSettingsChange } = deps;
 
   router.get('/', asyncHandler(async (_req: Request, res: Response): Promise<void> => {
     const settings = await settingsRepository.get();
@@ -95,7 +99,7 @@ export function createSettingsRouter(deps: SettingsRouterDependencies): Router {
 
   router.put('/', asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const body = req.body as UpdateSettingsBody;
-    const { maxConcurrentAgents, claudePermissions, agentPromptTemplate, sendWithCtrlEnter, historyLimit, enableDesktopNotifications, appendSystemPrompt, promptTemplates, mcp, chromeEnabled, inventifyFolder, docker } = body;
+    const { maxConcurrentAgents, claudePermissions, agentPromptTemplate, sendWithCtrlEnter, historyLimit, enableDesktopNotifications, appendSystemPrompt, promptTemplates, mcp, slack, chromeEnabled, inventifyFolder, docker } = body;
 
     if (maxConcurrentAgents !== undefined && (typeof maxConcurrentAgents !== 'number' || maxConcurrentAgents < 1)) {
       throw new ValidationError('maxConcurrentAgents must be a positive number');
@@ -119,6 +123,25 @@ export function createSettingsRouter(deps: SettingsRouterDependencies): Router {
       validateDockerSettings(docker);
     }
 
+    if (slack?.botToken && slack.botToken.trim()) {
+      if (!slackService) {
+        throw new ValidationError('Slack service not available');
+      }
+
+      const validation = await slackService.validateBotToken(slack.botToken.trim());
+
+      if (!validation.valid) {
+        throw new ValidationError('Invalid bot token: ' + (validation.error ?? 'authentication failed'));
+      }
+    }
+
+    // Trim Slack token values before saving
+    const slackPayload = slack ? {
+      ...slack,
+      ...(slack.botToken !== undefined && { botToken: slack.botToken.trim() }),
+      ...(slack.appToken !== undefined && { appToken: slack.appToken.trim() }),
+    } : undefined;
+
     // Get current settings to detect changes
     const currentSettings = await settingsRepository.get();
     const appendSystemPromptChanged = appendSystemPrompt !== undefined &&
@@ -126,6 +149,9 @@ export function createSettingsRouter(deps: SettingsRouterDependencies): Router {
 
     const mcpChanged = mcp !== undefined &&
       JSON.stringify(mcp) !== JSON.stringify(currentSettings.mcp);
+
+    const slackChanged = slackPayload !== undefined &&
+      JSON.stringify(slackPayload) !== JSON.stringify(currentSettings.slack);
 
     const updated = await settingsRepository.update({
       maxConcurrentAgents,
@@ -137,6 +163,7 @@ export function createSettingsRouter(deps: SettingsRouterDependencies): Router {
       appendSystemPrompt,
       promptTemplates,
       mcp,
+      slack: slackPayload,
       chromeEnabled,
       inventifyFolder,
       docker,
@@ -156,6 +183,10 @@ export function createSettingsRouter(deps: SettingsRouterDependencies): Router {
 
       if (mcpChanged) {
         changeEvent.mcpChanged = true;
+      }
+
+      if (slackChanged) {
+        changeEvent.slackChanged = true;
       }
 
       if (Object.keys(changeEvent).length > 0) {

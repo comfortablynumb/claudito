@@ -347,7 +347,7 @@ describe('PermissionModeModule', () => {
 
       PermissionModeModule.approvePlanAndSwitch();
 
-      expect(mockApi.sendAgentMessage).toHaveBeenCalledWith('test-project-id', 'yes');
+      expect(mockApi.sendAgentMessage).toHaveBeenCalledWith('test-project-id', 'yes', null, true);
       expect(mockState.permissionMode).toBe('acceptEdits');
       expect(mockState.pendingPermissionMode).toBeNull();
     });

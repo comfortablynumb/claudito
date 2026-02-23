@@ -34,6 +34,22 @@ export interface McpOverrides {
   };
 }
 
+export type SlackNotificationEvent =
+  | 'agent_completed'
+  | 'agent_failed'
+  | 'agent_waiting'
+  | 'ralph_loop_complete'
+  | 'ralph_loop_error'
+  | 'milestone_completed'
+  | 'milestone_failed';
+
+export interface SlackNotificationConfig {
+  channelId: string;
+  events: SlackNotificationEvent[];
+  mentionUsers: string[];
+  threadReplies: boolean;
+}
+
 export interface ProjectStatus {
   id: string;
   name: string;
@@ -54,6 +70,10 @@ export interface ProjectStatus {
   dockerOverride?: boolean;
   /** Per-project Docker image override (null/undefined = use global baseImage) */
   dockerImage?: string | null;
+  /** Per-project Slack notification configuration */
+  slackNotification?: SlackNotificationConfig | null;
+  /** Slack channel linked to this project for feed updates */
+  slackLinkedChannelId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -100,6 +120,8 @@ export interface ProjectRepository {
   updateRunConfigurations(id: string, configs: RunConfiguration[]): Promise<ProjectStatus | null>;
   updateDockerOverride(id: string, dockerOverride: boolean | undefined): Promise<ProjectStatus | null>;
   updateDockerImage(id: string, dockerImage: string | null): Promise<ProjectStatus | null>;
+  updateSlackNotification(id: string, config: SlackNotificationConfig | null): Promise<ProjectStatus | null>;
+  updateSlackLinkedChannel(id: string, channelId: string | null): Promise<ProjectStatus | null>;
   updateProjectPath(id: string, newName: string, newPath: string): Promise<ProjectStatus | null>;
   delete(id: string): Promise<boolean>;
 }
@@ -506,6 +528,30 @@ export class FileProjectRepository implements ProjectRepository {
     }
 
     status.dockerImage = dockerImage;
+    this.saveStatus(status);
+    return Promise.resolve({ ...status });
+  }
+
+  updateSlackNotification(id: string, config: SlackNotificationConfig | null): Promise<ProjectStatus | null> {
+    const status = this.loadStatus(id);
+
+    if (!status) {
+      return Promise.resolve(null);
+    }
+
+    status.slackNotification = config;
+    this.saveStatus(status);
+    return Promise.resolve({ ...status });
+  }
+
+  updateSlackLinkedChannel(id: string, channelId: string | null): Promise<ProjectStatus | null> {
+    const status = this.loadStatus(id);
+
+    if (!status) {
+      return Promise.resolve(null);
+    }
+
+    status.slackLinkedChannelId = channelId;
     this.saveStatus(status);
     return Promise.resolve({ ...status });
   }

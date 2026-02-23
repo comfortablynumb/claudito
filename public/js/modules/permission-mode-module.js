@@ -263,7 +263,7 @@
   }
 
   function approvePlanAndSwitch() {
-    api.sendAgentMessage(state.selectedProjectId, 'yes')
+    api.sendAgentMessage(state.selectedProjectId, 'yes', null, true)
       .done(function() {
         state.permissionMode = 'acceptEdits';
         state.pendingPermissionMode = null;

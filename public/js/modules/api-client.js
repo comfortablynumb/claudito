@@ -435,7 +435,7 @@
    *   { dataUrl: 'data:image/png;base64,...', mimeType: 'image/png' }
    * ]);
    */
-  ApiClient.sendAgentMessage = function(id, message, images) {
+  ApiClient.sendAgentMessage = function(id, message, images, planFeedback) {
     var payload = { message: message };
 
     if (images && images.length > 0) {
@@ -445,6 +445,10 @@
           data: img.dataUrl.split(',')[1] // Remove data:image/xxx;base64, prefix
         };
       });
+    }
+
+    if (planFeedback) {
+      payload.planFeedback = true;
     }
 
     return $.ajax({

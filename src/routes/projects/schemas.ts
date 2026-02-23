@@ -89,6 +89,7 @@ export const agentMessageSchema = z.object({
 export const agentSendMessageSchema = z.object({
   message: z.string().min(1, 'Message is required').optional(),
   images: z.array(imageSchema).optional(),
+  planFeedback: z.boolean().optional(),
 }).refine((data) => data.message || (data.images && data.images.length > 0), {
   message: 'Either message or images must be provided',
 });
