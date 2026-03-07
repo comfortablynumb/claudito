@@ -1,4 +1,5 @@
 export * from './claude-agent';
+export { CommandEntry } from './types';
 export {
   AgentManager,
   AgentManagerEvents,
@@ -12,6 +13,7 @@ export {
   OneOffAgentOptions,
   OneOffMeta,
   ActiveOneOffAgent,
+  OneOffCommandEntry,
 } from './agent-manager';
 
 // Export from new modules

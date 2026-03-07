@@ -161,6 +161,7 @@ export function createCoreRouter(deps: ProjectRouterDependencies): Router {
     const processInfo = agentManager?.getProcessInfo(id);
     const debugInfo: DebugInfo = {
       lastCommand: agentManager?.getLastCommand(id) ?? null,
+      cliCommands: agentManager?.getCliCommandHistory(id) ?? [],
       processInfo: processInfo ? {
         pid: processInfo.pid,
         cwd: processInfo.cwd || '',

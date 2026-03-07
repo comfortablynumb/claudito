@@ -1231,6 +1231,7 @@ describe('AgentManager Lifecycle Tests', () => {
         waitingVersion: 0,
         sessionId: null,
         permissionMode: null,
+        hasActiveOneOffAgents: false,
       });
 
       await agentManager.startInteractiveAgent(projectId);

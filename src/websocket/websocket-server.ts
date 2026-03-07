@@ -801,6 +801,14 @@ export class DefaultWebSocketServer implements ProjectWebSocketServer {
         projectId: meta.projectId,
         data: { oneOffId, status, label: meta.label },
       });
+
+      // Re-broadcast agent_status so the UI project badge reflects one-off activity
+      const fullStatus = this.agentManager.getFullStatus(meta.projectId);
+      this.broadcast({
+        type: 'agent_status',
+        projectId: meta.projectId,
+        data: fullStatus,
+      });
     });
 
     this.agentManager.on('oneOffWaiting', (oneOffId, isWaiting, version) => {

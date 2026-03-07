@@ -83,6 +83,12 @@ export interface AgentMessage {
   slackUsername?: string;
 }
 
+export interface CommandEntry {
+  command: string;
+  workdir?: string;
+  timestamp: string;
+}
+
 export interface ProcessInfo {
   pid: number;
   command?: string;

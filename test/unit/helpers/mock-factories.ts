@@ -1045,6 +1045,7 @@ export function createMockAgentManager(): jest.Mocked<AgentManager> {
       return loopStates.get(projectId) || null;
     }),
     getLastCommand: jest.fn().mockReturnValue(null),
+    getRecentCommands: jest.fn().mockReturnValue([]),
     getProcessInfo: jest.fn().mockReturnValue(null),
     getContextUsage: jest.fn().mockReturnValue(null),
     getQueuedMessageCount: jest.fn().mockReturnValue(0),
@@ -1062,6 +1063,7 @@ export function createMockAgentManager(): jest.Mocked<AgentManager> {
         waitingVersion: 0,
         sessionId: null,
         permissionMode: null,
+        hasActiveOneOffAgents: false,
       };
       return fullStatus;
     }),
@@ -1079,6 +1081,8 @@ export function createMockAgentManager(): jest.Mocked<AgentManager> {
     isOneOffWaitingForInput: jest.fn().mockReturnValue(false),
     getOneOffCollectedOutput: jest.fn().mockReturnValue(null),
     getActiveOneOffAgents: jest.fn().mockReturnValue([] as ActiveOneOffAgent[]),
+    getOneOffCommandHistory: jest.fn().mockReturnValue([]),
+    getCliCommandHistory: jest.fn().mockReturnValue([]),
     on: jest.fn().mockImplementation(<K extends keyof AgentManagerEvents>(
       event: K,
       listener: AgentManagerEvents[K]

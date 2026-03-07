@@ -151,7 +151,7 @@ describe('FolderBrowserModule', () => {
 
       FolderBrowserModule.updateSelectedPathDisplay();
 
-      expect(global.$).toHaveBeenCalledWith('#btn-new-folder');
+      expect(global.$).toHaveBeenCalledWith('#btn-folder-browser-new-folder');
       expect(mockEl.prop).toHaveBeenCalledWith('disabled', false);
     });
 
@@ -172,7 +172,7 @@ describe('FolderBrowserModule', () => {
 
       FolderBrowserModule.updateSelectedPathDisplay();
 
-      expect(global.$).toHaveBeenCalledWith('#btn-new-folder');
+      expect(global.$).toHaveBeenCalledWith('#btn-folder-browser-new-folder');
       expect(mockEl.prop).toHaveBeenCalledWith('disabled', true);
     });
   });
@@ -421,7 +421,7 @@ describe('FolderBrowserModule', () => {
 
       FolderBrowserModule.setupHandlers();
 
-      expect(global.$).toHaveBeenCalledWith('#btn-new-folder');
+      expect(global.$).toHaveBeenCalledWith('#btn-folder-browser-new-folder');
       expect(mockBtn.on).toHaveBeenCalledWith('click', expect.any(Function));
     });
   });

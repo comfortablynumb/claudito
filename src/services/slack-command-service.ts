@@ -160,6 +160,7 @@ export class DefaultSlackCommandService implements SlackCommandService {
   private readonly deps: SlackCommandServiceDeps;
   private readonly logger: Logger;
   private readonly pendingContexts = new Map<string, PendingContext>();
+  private readonly oneOffSlackSubs = new Map<string, { setPendingMsgTs: (ts: string) => void }>();
 
   constructor(deps: SlackCommandServiceDeps) {
     this.deps = deps;
@@ -465,6 +466,18 @@ export class DefaultSlackCommandService implements SlackCommandService {
       const meta = this.deps.agentManager.getOneOffMeta(oneOffId);
 
       if (meta) {
+        const botToken = await this.getBotToken();
+
+        if (botToken) {
+          const workingMsgTs = await this.deps.slackService.replyInThread(
+            botToken, channelId, threadTs, '⏳ Working on it...',
+          );
+
+          if (workingMsgTs) {
+            this.oneOffSlackSubs.get(oneOffId)?.setPendingMsgTs(workingMsgTs);
+          }
+        }
+
         this.deps.agentManager.sendOneOffInput(oneOffId, text);
         this.logger.info('Thread reply routed to one-off agent', { oneOffId, channelId });
         return;
@@ -494,21 +507,24 @@ export class DefaultSlackCommandService implements SlackCommandService {
 
   private subscribeOneOffToSlack(opts: OneOffSlackSub): void {
     const { oneOffId, channelId, threadTs, botToken } = opts;
-    let pendingMsgTs = opts.workingMsgTs;
-    let lastSentLength = 0;
-    let done = false;
+    const state = { pendingMsgTs: opts.workingMsgTs, lastSentLength: 0, done: false };
 
     const cleanup = (): void => {
+      this.oneOffSlackSubs.delete(oneOffId);
       this.deps.agentManager.off('oneOffWaiting', onWaiting);
       this.deps.agentManager.off('oneOffStatus', onStatus);
     };
 
+    this.oneOffSlackSubs.set(oneOffId, {
+      setPendingMsgTs: (ts: string) => { state.pendingMsgTs = ts; },
+    });
+
     const sendDelta = (output: string, fallback: string): void => {
-      const raw = convertToMrkdwn(output.slice(lastSentLength).trim()) || fallback;
-      lastSentLength = output.length;
+      const raw = convertToMrkdwn(output.slice(state.lastSentLength).trim()) || fallback;
+      state.lastSentLength = output.length;
       if (!raw) return;
-      const ts = pendingMsgTs;
-      pendingMsgTs = '';
+      const ts = state.pendingMsgTs;
+      state.pendingMsgTs = '';
       this.sendSlackDelta({ botToken, channelId, threadTs }, raw, ts).catch((err) => {
         this.logger.error('sendSlackDelta failed', { error: String(err) });
       });
@@ -520,9 +536,9 @@ export class DefaultSlackCommandService implements SlackCommandService {
     };
 
     const onStatus = (id: string, status: AgentStatus): void => {
-      if (id !== oneOffId || done) return;
+      if (id !== oneOffId || state.done) return;
       if (status !== 'stopped' && status !== 'error') return;
-      done = true;
+      state.done = true;
       cleanup();
       sendDelta(this.deps.agentManager.getOneOffCollectedOutput(oneOffId) || '', '✅ Done.');
     };

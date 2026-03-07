@@ -17,7 +17,7 @@
   var ShellModule = window.ShellModule;
   var RalphLoopModule = window.RalphLoopModule;
   var DebugModal = window.DebugModal;
-  var FileBrowser = window.FileBrowser;
+  var FileBrowser = window.FileBrowserV2;
   var RoadmapModule = window.RoadmapModule;
   var ModalsModule = window.ModalsModule;
   var SearchModule = window.SearchModule;
@@ -165,6 +165,7 @@
     hasUnsavedMcpChanges: false, // Track if MCP server changes haven't been saved
     chromeEnabled: false, // Chrome browser usage for agents
     deferredPlanMessage: null, // Stores ExitPlanMode message when questions are pending
+    lastPlanContent: null, // Stores the most recent plan content from ExitPlanMode
     settings: null, // Global settings object
     selectedGitHubRepo: null, // Selected repo full name for GitHub clone
     submittedQuestionToolIds: {}, // Track toolIds already submitted to prevent duplicates
@@ -1181,6 +1182,7 @@
 
       if (message.type === 'plan_mode' && message.planModeInfo && message.planModeInfo.action === 'exit') {
         setPromptBlockingState('plan_mode');
+        state.lastPlanContent = message.planModeInfo.planContent || '';
       }
 
       // Block input during compaction
@@ -2748,8 +2750,15 @@
       // Clear prompt blocking
       setPromptBlockingState(null);
 
-      // Switch to Accept Edits mode and restart agent with implementation message
-      PermissionModeModule.approvePlanAndSwitch();
+      var project = findProjectById(state.selectedProjectId);
+
+      if (project && project.status !== 'running') {
+        // Agent not running (server restart/crash) — start directly in acceptEdits mode with plan content
+        startInteractiveAgentWithMessage(state.lastPlanContent || '', 'acceptEdits');
+      } else {
+        // Switch to Accept Edits mode and restart agent with implementation message
+        PermissionModeModule.approvePlanAndSwitch();
+      }
     });
 
     // Plan mode reject button handler
@@ -2761,7 +2770,14 @@
       // Clear prompt blocking
       setPromptBlockingState(null);
 
-      sendPlanModeResponse('no');
+      var project = findProjectById(state.selectedProjectId);
+
+      if (project && project.status !== 'running') {
+        // Agent not running (server restart/crash) — start in plan mode and pass 'no'
+        startInteractiveAgentWithMessage('no', 'plan');
+      } else {
+        sendPlanModeResponse('no');
+      }
     });
 
     // Plan mode request changes button handler
@@ -3250,7 +3266,9 @@
 
     // If agent is not running, start it first (always interactive mode)
     if (project.status !== 'running') {
-      startInteractiveAgentWithMessage(message);
+      var permOverride = state.planFeedbackPending ? 'plan' : null;
+      state.planFeedbackPending = false;
+      startInteractiveAgentWithMessage(message, permOverride);
       return;
     }
 
@@ -3322,7 +3340,7 @@
       });
   }
 
-  function startInteractiveAgentWithMessage(message) {
+  function startInteractiveAgentWithMessage(message, permissionModeOverride) {
     if (state.agentStarting) return;
 
     // Don't start agent if Ralph Loop is running
@@ -3355,7 +3373,8 @@
     $('#btn-send-message').prop('disabled', true);
     showContentLoading(sessionId ? 'Resuming session...' : 'Starting agent...');
 
-    api.startInteractiveAgent(projectId, message, images, sessionId, state.permissionMode)
+    var permissionMode = permissionModeOverride || state.permissionMode;
+    api.startInteractiveAgent(projectId, message, images, sessionId, permissionMode)
       .done(function(response) {
         state.currentAgentMode = 'interactive';
         updateProjectStatusById(projectId, 'running');
@@ -5496,6 +5515,11 @@
     var status = typeof data === 'object' ? data.status : data;
     var fullStatus = typeof data === 'object' ? data : null;
 
+    // If the main agent is stopped but one-off agents are active, show as running in the sidebar
+    if (status === 'stopped' && fullStatus && fullStatus.hasActiveOneOffAgents) {
+      status = 'running';
+    }
+
     updateProjectStatusById(projectId, status);
     updateAgentOutputHeader(projectId, status);
 
@@ -5560,6 +5584,14 @@
     // Reset mode selector and waiting state when agent stops
     if (status !== 'running' && projectId === state.selectedProjectId) {
       state.currentAgentMode = null;
+
+      // Clear any stale prompt blocking (plan_mode, question, permission, etc.).
+      // Discard deferred plan messages first so replaying them doesn't re-block.
+      state.deferredPlanMessage = null;
+      setPromptBlockingState(null);
+
+      // updateInputArea() is redundant after setPromptBlockingState(null) but kept
+      // as a safety net for any other disabling paths (e.g. isModeSwitching).
       updateInputArea();
       updateWaitingIndicator(false);
 

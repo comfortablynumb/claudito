@@ -200,6 +200,7 @@ export interface MemoryUsage {
 
 export interface DebugInfo {
   lastCommand: string | null;
+  cliCommands: Array<{ label: string; command: string; timestamp: string }>;
   processInfo: {
     pid: number;
     cwd: string;

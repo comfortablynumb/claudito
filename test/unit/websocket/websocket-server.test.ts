@@ -632,6 +632,7 @@ describe('DefaultWebSocketServer', () => {
         waitingVersion: 1,
         sessionId: 'session-123',
         permissionMode: 'acceptEdits' as const,
+        hasActiveOneOffAgents: false,
       };
 
       mockAgentManager.getFullStatus.mockReturnValue(mockFullStatus);

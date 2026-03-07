@@ -151,7 +151,7 @@ export class MarkdownRoadmapEditor implements RoadmapEditor {
     milestoneTitle: string,
     taskTitle: string
   ): string {
-    const lines = content.split('\n');
+    const lines = content.split(/\r?\n/);
     const result: string[] = [];
     let inTargetPhase = false;
     let inTargetMilestone = false;
@@ -194,7 +194,7 @@ export class MarkdownRoadmapEditor implements RoadmapEditor {
     milestoneTitle: string,
     taskIndex: number
   ): string {
-    const lines = content.split('\n');
+    const lines = content.split(/\r?\n/);
     const result: string[] = [];
     let inTargetPhase = false;
     let inTargetMilestone = false;
@@ -223,7 +223,7 @@ export class MarkdownRoadmapEditor implements RoadmapEditor {
   }
 
   private removeMilestoneFromContent(content: string, phaseTitle: string, milestoneTitle: string): string {
-    const lines = content.split('\n');
+    const lines = content.split(/\r?\n/);
     const result: string[] = [];
     let inTargetPhase = false;
     let skipUntilNextSection = false;
@@ -251,7 +251,7 @@ export class MarkdownRoadmapEditor implements RoadmapEditor {
   }
 
   private removePhaseFromContent(content: string, phaseTitle: string): string {
-    const lines = content.split('\n');
+    const lines = content.split(/\r?\n/);
     const result: string[] = [];
     let skipUntilNextPhase = false;
 
@@ -293,14 +293,21 @@ export class MarkdownRoadmapEditor implements RoadmapEditor {
 
 export class MarkdownRoadmapParser implements RoadmapParser {
   parse(content: string): ParsedRoadmap {
-    const lines = content.split('\n');
+    const lines = content.split(/\r?\n/);
     const phases: RoadmapPhase[] = [];
     const context: ParserContext = {
       currentPhase: null,
       currentMilestone: null,
     };
 
+    let seenFirstPhase = false;
+
     for (const line of lines) {
+      if (!seenFirstPhase) {
+        if (!this.parsePhaseHeader(line)) continue;
+        seenFirstPhase = true;
+      }
+
       this.processLine(line, phases, context);
     }
 

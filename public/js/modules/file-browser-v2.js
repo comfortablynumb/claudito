@@ -293,7 +293,7 @@
     var $container = $('#code-editor-container');
     var $highlight = $('#code-editor-highlight');
 
-    if (language && typeof hljs !== 'undefined') {
+    if (language && typeof hljs !== 'undefined' && content) {
       $container.addClass('highlighting');
       var highlighted = highlightCode(content, language);
       // Add trailing newline to ensure proper alignment with textarea
@@ -340,7 +340,7 @@
 
       var markdownToggle = '';
       if (file.isMarkdown) {
-        markdownToggle = '<button class="tab-preview-toggle ml-1 text-gray-400 hover:text-gray-200" onclick="toggleMarkdownPreview(\'' + escapeHtml(file.path).replace(/'/g, "\\'") + '\')" title="' + (file.previewMode ? 'Edit' : 'Preview') + '">' +
+        markdownToggle = '<button class="tab-preview-toggle ml-1 text-gray-400 hover:text-gray-200" title="' + (file.previewMode ? 'Edit' : 'Preview') + '">' +
           (file.previewMode ?
             '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>' :
             '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>'
@@ -1037,6 +1037,21 @@
       closeFile(path);
     });
 
+    // Click on markdown preview toggle button
+    addEventListener(document, 'click', function(e) {
+      var $target = $(e.target);
+      var $btn = $target.closest('.tab-preview-toggle');
+
+      if (!$btn.length) return;
+
+      e.stopPropagation();
+      var path = $btn.closest('.file-tab').data('path');
+
+      if (path) {
+        toggleMarkdownPreview(path);
+      }
+    });
+
     // Middle-click on file tab to close it
     addEventListener(document, 'mousedown', function(e) {
       if (e.button !== 1) return;
@@ -1228,14 +1243,15 @@
   function isValidDropTarget(sourcePath, targetPath) {
     if (!sourcePath || !targetPath) return false;
     if (sourcePath === targetPath) return false;
-    if (targetPath.startsWith(sourcePath + '/')) return false;
+    if (targetPath.startsWith(sourcePath + '/') || targetPath.startsWith(sourcePath + '\\')) return false;
     return true;
   }
 
   // Move file/folder via API
   function moveFileOrFolder(sourcePath, targetPath) {
-    var fileName = sourcePath.split('/').pop();
-    var newPath = targetPath + '/' + fileName;
+    var sep = sourcePath.indexOf('\\') !== -1 ? '\\' : '/';
+    var fileName = sourcePath.split(sep).pop();
+    var newPath = targetPath + sep + fileName;
 
     $.ajax({
       url: '/api/fs/move',

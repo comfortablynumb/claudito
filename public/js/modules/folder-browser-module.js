@@ -84,12 +84,12 @@
         '<span class="text-gray-300">Current folder:</span> ' +
         '<span class="text-purple-400">' + escapeHtml(currentPath) + '</span>'
       );
-      $('#btn-new-folder').prop('disabled', false);
+      $('#btn-folder-browser-new-folder').prop('disabled', false);
     } else {
       $('#selected-path').html(
         '<span class="text-gray-500">Navigate to a folder to select it</span>'
       );
-      $('#btn-new-folder').prop('disabled', true);
+      $('#btn-folder-browser-new-folder').prop('disabled', true);
     }
   }
 
@@ -297,7 +297,7 @@
       confirmSelection();
     });
 
-    $('#btn-new-folder').on('click', function() {
+    $('#btn-folder-browser-new-folder').on('click', function() {
       createNewFolder();
     });
   }

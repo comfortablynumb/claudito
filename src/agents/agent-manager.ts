@@ -14,7 +14,9 @@ import {
   AgentStreamingOptions,
   WaitingStatus,
   ProcessSpawner,
+  ToolUseInfo,
 } from './claude-agent';
+import { CommandEntry } from './types';
 import { defaultSpawner } from './process-manager';
 import { DefaultPermissionGenerator, PermissionGenerator } from '../services/permission-generator';
 import {
@@ -116,6 +118,12 @@ export interface StartAgentResult {
   dockerFallbackReason?: string;
 }
 
+export interface OneOffCommandEntry {
+  label: string;
+  command: string;
+  timestamp: string;
+}
+
 export interface FullAgentStatus {
   status: AgentStatus;
   mode: AgentMode | null;
@@ -125,6 +133,7 @@ export interface FullAgentStatus {
   waitingVersion: number;
   sessionId: string | null;
   permissionMode: 'acceptEdits' | 'plan' | null;
+  hasActiveOneOffAgents: boolean;
 }
 
 export interface AgentManager {
@@ -149,6 +158,7 @@ export interface AgentManager {
   stopAutonomousLoop(projectId: string): void;
   getLoopState(projectId: string): AgentLoopState | null;
   getLastCommand(projectId: string): string | null;
+  getRecentCommands(projectId: string): CommandEntry[];
   getProcessInfo(projectId: string): ProcessInfo | null;
   getContextUsage(projectId: string): ContextUsage | null;
   getQueuedMessageCount(projectId: string): number;
@@ -170,6 +180,8 @@ export interface AgentManager {
   isOneOffWaitingForInput(oneOffId: string): boolean;
   getOneOffCollectedOutput(oneOffId: string): string | null;
   getActiveOneOffAgents(projectId: string): ActiveOneOffAgent[];
+  getOneOffCommandHistory(projectId: string): OneOffCommandEntry[];
+  getCliCommandHistory(projectId: string): OneOffCommandEntry[];
   on<K extends keyof AgentManagerEvents>(event: K, listener: AgentManagerEvents[K]): void;
   off<K extends keyof AgentManagerEvents>(event: K, listener: AgentManagerEvents[K]): void;
 }
@@ -256,6 +268,9 @@ export class DefaultAgentManager implements AgentManager {
   };
   private waitingVersions: Map<string, number> = new Map();
   private oneOffWaitingVersions: Map<string, number> = new Map();
+  private readonly recentCommands: Map<string, CommandEntry[]> = new Map();
+  private readonly oneOffCommandHistory: Map<string, OneOffCommandEntry[]> = new Map();
+  private readonly cliCommandHistory: Map<string, OneOffCommandEntry[]> = new Map();
   private queuedMessages: Map<string, string[]> = new Map();
   private pendingPlans: Map<string, { planContent: string; sessionId: string | null }> = new Map();
   private _maxConcurrentAgents: number;
@@ -457,6 +472,9 @@ export class DefaultAgentManager implements AgentManager {
     // Start agent
     agent.start(initialInstructions || '');
 
+    const cliCmd = agent.lastCommand;
+    if (cliCmd) this.recordCliCommand(projectId, 'Interactive', cliCmd);
+
     // Record and broadcast the initial user message (e.g. from Slack) so it appears in the browser
     if (options?.initialMessage && options.slackMeta) {
       const conversationId = agent.sessionId;
@@ -565,8 +583,11 @@ export class DefaultAgentManager implements AgentManager {
         });
       });
 
-      // Broadcast user message so it appears in the browser immediately
-      this.emit('message', projectId, userMessage);
+      // Only broadcast via WebSocket for Slack-sourced messages; UI-triggered sends
+      // already append the message locally (optimistic update in doSendMessage).
+      if (slackMeta) {
+        this.emit('message', projectId, userMessage);
+      }
     }
 
     agent.sendInput(contentToSend);
@@ -702,6 +723,33 @@ export class DefaultAgentManager implements AgentManager {
     return agent ? agent.lastCommand : null;
   }
 
+  getRecentCommands(projectId: string): CommandEntry[] {
+    return this.recentCommands.get(projectId) ?? [];
+  }
+
+  private recordBashCommand(projectId: string, toolInfo: ToolUseInfo): void {
+    const cmd = toolInfo.input?.['command'];
+    if (typeof cmd !== 'string' || !cmd.trim()) return;
+
+    const entries = this.recentCommands.get(projectId) ?? [];
+    entries.push({
+      command: cmd,
+      workdir: typeof toolInfo.input?.['cwd'] === 'string' ? toolInfo.input['cwd'] : undefined,
+      timestamp: new Date().toISOString(),
+    });
+
+    if (entries.length > 50) entries.splice(0, entries.length - 50);
+    this.recentCommands.set(projectId, entries);
+  }
+
+  private recordCliCommand(projectId: string, label: string, command: string): void {
+    const entries = this.cliCommandHistory.get(projectId) ?? [];
+    entries.push({ label, command, timestamp: new Date().toISOString() });
+
+    if (entries.length > 50) entries.splice(0, entries.length - 50);
+    this.cliCommandHistory.set(projectId, entries);
+  }
+
   getProcessInfo(projectId: string): ProcessInfo | null {
     const agent = this.agents.get(projectId);
     return agent ? agent.processInfo : null;
@@ -758,6 +806,7 @@ export class DefaultAgentManager implements AgentManager {
 
   getFullStatus(projectId: string): FullAgentStatus {
     const agent = this.agents.get(projectId);
+    const activeOneOffs = this.getActiveOneOffAgents(projectId).filter((a) => a.status === 'running');
 
     return {
       status: this.getAgentStatus(projectId),
@@ -768,6 +817,7 @@ export class DefaultAgentManager implements AgentManager {
       waitingVersion: this.getWaitingVersion(projectId),
       sessionId: this.getSessionId(projectId),
       permissionMode: agent?.permissionMode || null,
+      hasActiveOneOffAgents: activeOneOffs.length > 0,
     };
   }
 
@@ -971,6 +1021,19 @@ export class DefaultAgentManager implements AgentManager {
     this.setupOneOffAgentListeners(oneOffId, agent);
     agent.start(options.message);
 
+    const cmd = agent.lastCommand;
+
+    if (cmd) {
+      const label = options.label || 'One-off Agent';
+      const entries = this.oneOffCommandHistory.get(options.projectId) ?? [];
+      entries.push({ label, command: cmd, timestamp: new Date().toISOString() });
+
+      if (entries.length > 50) entries.splice(0, entries.length - 50);
+      this.oneOffCommandHistory.set(options.projectId, entries);
+
+      this.recordCliCommand(options.projectId, label, cmd);
+    }
+
     return oneOffId;
   }
 
@@ -1018,6 +1081,7 @@ export class DefaultAgentManager implements AgentManager {
       waitingVersion: this.oneOffWaitingVersions.get(oneOffId) || 0,
       sessionId: agent.sessionId,
       permissionMode: agent.permissionMode || null,
+      hasActiveOneOffAgents: false,
     };
   }
 
@@ -1048,8 +1112,21 @@ export class DefaultAgentManager implements AgentManager {
     return result;
   }
 
+  getOneOffCommandHistory(projectId: string): OneOffCommandEntry[] {
+    return this.oneOffCommandHistory.get(projectId) ?? [];
+  }
+
+  getCliCommandHistory(projectId: string): OneOffCommandEntry[] {
+    return this.cliCommandHistory.get(projectId) ?? [];
+  }
+
   private setupOneOffAgentListeners(oneOffId: string, agent: ClaudeAgent): void {
     agent.on('message', (message: AgentMessage) => {
+      if (message.type === 'tool_use' && message.toolInfo?.name === 'Bash') {
+        const meta = this.oneOffMeta.get(oneOffId);
+        if (meta) this.recordBashCommand(meta.projectId, message.toolInfo);
+      }
+
       this.emit('oneOffMessage', oneOffId, message);
     });
 
@@ -1279,6 +1356,10 @@ export class DefaultAgentManager implements AgentManager {
       if (conversationId) {
         // Save assistant messages to conversation
         // Only save specific message types that represent assistant output
+        if (message.type === 'tool_use' && message.toolInfo?.name === 'Bash') {
+          this.recordBashCommand(projectId, message.toolInfo);
+        }
+
         if (message.type === 'stdout' || message.type === 'tool_use' || message.type === 'tool_result') {
           // These are assistant messages
           this.trackMessageSave(

@@ -735,25 +735,52 @@
     }
   }
 
+  function formatCommandRelativeTime(timestamp) {
+    var now = Date.now();
+    var then = new Date(timestamp).getTime();
+    var diffSec = Math.floor((now - then) / 1000);
+
+    if (diffSec < 60) return diffSec + 's ago';
+    if (diffSec < 3600) return Math.floor(diffSec / 60) + 'm ago';
+    if (diffSec < 86400) return Math.floor(diffSec / 3600) + 'h ago';
+    return Math.floor(diffSec / 86400) + 'd ago';
+  }
+
   function renderCommandsTab(data) {
     var html = '';
+    var commands = data.cliCommands || [];
 
+    html += '<div class="space-y-4">';
+
+    // Claude Code CLI commands list
     html += '<div class="bg-gray-800 rounded-lg p-4">';
     html += '<h4 class="text-gray-300 font-semibold mb-3 flex items-center gap-2">';
     html += '<svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">';
     html += '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>';
-    html += '</svg>Last Executed Command</h4>';
+    html += '</svg>Claude Code CLI Commands (' + commands.length + ' / 50)</h4>';
 
-    if (data.lastCommand) {
-      html += '<div class="relative">';
-      html += '<pre class="bg-gray-900 rounded p-4 text-sm text-gray-300 whitespace-pre-wrap break-all font-mono overflow-x-auto">' + escapeHtml(data.lastCommand) + '</pre>';
-      html += '<button onclick="copyToClipboard(\'' + escapeHtml(data.lastCommand.replace(/'/g, "\\'").replace(/\n/g, '\\n')) + '\')" class="absolute top-2 right-2 bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded text-xs transition-colors">Copy</button>';
+    if (commands.length > 0) {
+      html += '<div class="space-y-2 max-h-96 overflow-y-auto">';
+
+      for (var i = commands.length - 1; i >= 0; i--) {
+        var entry = commands[i];
+        var relTime = formatCommandRelativeTime(entry.timestamp);
+
+        html += '<div class="bg-gray-900 rounded p-3">';
+        html += '<div class="flex justify-between items-start mb-1">';
+        html += '<span class="text-purple-400 text-xs font-medium">' + escapeHtml(entry.label) + '</span>';
+        html += '<span class="text-gray-500 text-xs">' + escapeHtml(relTime) + '</span>';
+        html += '</div>';
+        html += '<pre class="text-gray-300 text-xs whitespace-pre-wrap break-all font-mono">' + escapeHtml(entry.command) + '</pre>';
+        html += '</div>';
+      }
+
       html += '</div>';
     } else {
-      html += '<div class="text-gray-500 text-center py-4">No command executed yet</div>';
+      html += '<div class="text-gray-500 text-center py-4">No Claude Code CLI commands executed yet</div>';
     }
 
-    html += '</div>';
+    html += '</div></div>';
 
     $('#debug-commands-content').html(html);
   }

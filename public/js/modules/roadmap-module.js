@@ -13,6 +13,7 @@
 
   // Dependencies injected via init()
   var state = null;
+  var lastRoadmapData = null;
   var escapeHtml = null;
   var showToast = null;
   var closeModal = null;
@@ -41,6 +42,7 @@
   }
 
   function renderRoadmap(data) {
+    lastRoadmapData = data;
     var $container = $('#roadmap-content');
 
     if (!data || !data.parsed) {
@@ -49,6 +51,20 @@
     }
 
     var parsed = data.parsed;
+
+    if (!parsed.phases || parsed.phases.length === 0) {
+      $container.html(
+        '<div class="text-gray-400 text-center py-8">' +
+        '<p class="mb-2">Roadmap format not recognized.</p>' +
+        '<p class="text-xs text-gray-500 mb-4">Expected phase headers like <code class="bg-gray-700 px-1 rounded">## Phase 1: Title</code> and milestone headers like <code class="bg-gray-700 px-1 rounded">### Milestone 1.1: Title</code>.</p>' +
+        '<button id="btn-adapt-roadmap-format" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded">' +
+        'Adapt roadmap to expected Claudito format' +
+        '</button>' +
+        '</div>'
+      );
+      return;
+    }
+
     var html = renderOverallProgress(parsed.overallProgress);
     html += renderPhases(parsed.phases, parsed.currentPhase, parsed.currentMilestone);
 
@@ -465,6 +481,45 @@
     $('#btn-clear-roadmap-selection').on('click', function() {
       clearRoadmapSelection();
     });
+
+    // Adapt roadmap format button
+    $(document).on('click', '#btn-adapt-roadmap-format', function() {
+      adaptRoadmapFormat();
+    });
+  }
+
+  function adaptRoadmapFormat() {
+    var project = findProjectById(state.selectedProjectId);
+    if (!project) return;
+
+    var roadmapPath = project.path.replace(/\\/g, '/') + '/doc/ROADMAP.md';
+    var prompt = buildAdaptRoadmapPrompt(roadmapPath);
+
+    closeModal('modal-roadmap');
+
+    var isRunning = project.status === 'running';
+
+    if (!isRunning) {
+      ensureAcceptEditsMode();
+      startInteractiveAgentWithMessage(prompt);
+      return;
+    }
+
+    if (state.permissionMode === 'acceptEdits') {
+      doSendMessage(prompt);
+      return;
+    }
+
+    restartWithAcceptEditsAndMessage(prompt);
+  }
+
+  function buildAdaptRoadmapPrompt(roadmapPath) {
+    return 'The file `' + roadmapPath + '` exists but uses a format that Claudito\'s roadmap parser cannot parse.\n\n' +
+      'Please reformat it to match the expected Claudito format:\n\n' +
+      '- **Phase sections**: `## Phase N: Title` (e.g. `## Phase 1: Project Setup`)\n' +
+      '- **Milestone sections**: `### Milestone N.N: Title` (e.g. `### Milestone 1.1: Initial Setup`)\n' +
+      '- **Task items**: `- [ ] Task description` for pending, `- [x] Task description` for completed\n\n' +
+      'Please read the current file, understand the existing structure (phases, milestones, tasks), and reformat it while preserving all content. Make only the minimal changes required to match the format above.';
   }
 
   return {
