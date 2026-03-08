@@ -1,6 +1,6 @@
 import { AnthropicSdkAgent, AnthropicSdkAgentConfig } from '../../../src/agents/anthropic-sdk-agent';
-import { AgentMessage, AgentStatus, WaitingStatus } from '../../../src/agents/types';
-import { DEFAULT_AGENT_PROFILE, AgentProfile } from '../../../src/repositories/settings';
+import { AgentMessage, WaitingStatus } from '../../../src/agents/types';
+import { AgentProfile } from '../../../src/repositories/settings';
 
 // Mock the AI SDK
 jest.mock('@ai-sdk/anthropic', () => ({
@@ -20,7 +20,7 @@ const mockStreamText = streamText as jest.MockedFunction<typeof streamText>;
 
 function createMockStreamResult(text: string) {
   return {
-    textStream: (async function* () {
+    textStream: (function* () {
       yield text;
     })(),
   } as unknown as ReturnType<typeof streamText>;

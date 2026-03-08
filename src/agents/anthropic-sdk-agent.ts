@@ -109,7 +109,7 @@ export class AnthropicSdkAgent implements Agent {
     void this.processMessage(instructions);
   }
 
-  async stop(): Promise<void> {
+  stop(): Promise<void> {
     if (this.abortController) {
       this.abortController.abort();
       this.abortController = null;
@@ -118,6 +118,7 @@ export class AnthropicSdkAgent implements Agent {
     this._status = 'stopped';
     this.emitter.emit('status', this._status);
     this.emitter.emit('exit', 0);
+    return Promise.resolve();
   }
 
   sendInput(input: string): void {
