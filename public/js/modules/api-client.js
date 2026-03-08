@@ -917,6 +917,23 @@
   };
 
   // ============================================================
+  // Agent Profiles
+  // ============================================================
+
+  ApiClient.getProjectAgentProfile = function(projectId) {
+    return $.get(baseUrl + '/api/projects/' + projectId + '/agent-profile');
+  };
+
+  ApiClient.updateProjectAgentProfile = function(projectId, profileId) {
+    return $.ajax({
+      url: baseUrl + '/api/projects/' + projectId + '/agent-profile',
+      method: 'PUT',
+      contentType: 'application/json',
+      data: JSON.stringify({ profileId: profileId })
+    });
+  };
+
+  // ============================================================
   // Filesystem
   // ============================================================
 

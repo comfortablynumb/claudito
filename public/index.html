@@ -474,6 +474,11 @@
                     <option value="claude-haiku-4-5-20251001" class="bg-gray-700 text-white">Haiku 4.5</option>
                   </select>
                 </div>
+                <!-- Profile Selector -->
+                <div id="profile-selector" class="flex items-center bg-gray-700 rounded text-xs h-6" title="Select agent profile for this project">
+                  <select id="project-profile-select" class="bg-gray-700 text-white text-xs px-1.5 h-full rounded cursor-pointer focus:outline-none focus:ring-1 focus:ring-purple-500 appearance-none pr-5" style="background-image: url('data:image/svg+xml;charset=UTF-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%239ca3af%22 stroke-width=%222%22%3E%3Cpath stroke-linecap=%22round%22 stroke-linejoin=%22round%22 d=%22M19 9l-7 7-7-7%22/%3E%3C/svg%3E'); background-repeat: no-repeat; background-position: right 0.25rem center; background-size: 0.75rem;">
+                  </select>
+                </div>
                 <span id="active-issue-indicator" class="hidden flex items-center gap-1 text-xs text-green-400">
                   <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
@@ -1306,6 +1311,12 @@
               </svg>
               <span class="text-xs leading-none">Docker</span>
             </button>
+            <button type="button" class="settings-tab py-2 px-3 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200 flex flex-col items-center justify-center gap-0.5" data-tab="agent-profiles">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+              </svg>
+              <span class="text-xs leading-none">Profiles</span>
+            </button>
             <button type="button" class="settings-tab py-2 px-3 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200 flex flex-col items-center justify-center gap-0.5" data-tab="danger-zone">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
@@ -1612,6 +1623,63 @@
                 <button type="button" id="btn-build-image" class="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded text-sm transition-colors">Build</button>
               </div>
               <p class="text-xs text-gray-500 mt-1">Build a Docker image from a pre-configured variant</p>
+            </div>
+          </div>
+
+          <!-- Agent Profiles Tab -->
+          <div id="settings-tab-agent-profiles" class="settings-tab-content p-3 space-y-4 hidden">
+            <div class="flex items-center justify-between mb-2">
+              <h4 class="text-sm font-semibold text-gray-200">Agent Profiles</h4>
+              <button type="button" id="btn-add-agent-profile" class="bg-purple-600 hover:bg-purple-700 text-white px-2 py-1 rounded text-xs transition-colors">+ Add Profile</button>
+            </div>
+            <p class="text-xs text-gray-400">Configure how agents run. Each profile defines a provider and runtime. Select a profile per-project in the toolbar.</p>
+            <div id="agent-profiles-list" class="space-y-2"></div>
+            <!-- Inline editor (hidden by default) -->
+            <div id="agent-profile-editor" class="hidden bg-gray-800 border border-gray-600 rounded p-3 space-y-3">
+              <input type="hidden" id="profile-editor-id">
+              <div>
+                <label class="block text-xs font-medium text-gray-300 mb-1">Profile Name</label>
+                <input type="text" id="profile-editor-name" class="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm focus:outline-none focus:border-purple-500" placeholder="My Profile">
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-300 mb-1">Provider</label>
+                <select id="profile-editor-provider" class="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm focus:outline-none focus:border-purple-500">
+                  <option value="anthropic">Anthropic</option>
+                  <option value="opencode">OpenCode</option>
+                </select>
+              </div>
+              <div id="profile-editor-anthropic-options" class="space-y-3">
+                <div>
+                  <label class="block text-xs font-medium text-gray-300 mb-1">Runtime</label>
+                  <select id="profile-editor-runtime" class="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm focus:outline-none focus:border-purple-500">
+                    <option value="claude-binary">Claude Binary (CLI)</option>
+                    <option value="sdk">Anthropic SDK</option>
+                  </select>
+                </div>
+                <div id="profile-editor-sdk-options" class="hidden space-y-3">
+                  <div>
+                    <label class="block text-xs font-medium text-gray-300 mb-1">Auth Mode</label>
+                    <select id="profile-editor-auth-mode" class="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm focus:outline-none focus:border-purple-500">
+                      <option value="pro-plan">Pro/Max Plan (env ANTHROPIC_API_KEY)</option>
+                      <option value="api-key">API Key</option>
+                    </select>
+                  </div>
+                  <div id="profile-editor-api-key-group" class="hidden">
+                    <label class="block text-xs font-medium text-gray-300 mb-1">API Key</label>
+                    <input type="password" id="profile-editor-api-key" class="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm focus:outline-none focus:border-purple-500" placeholder="sk-ant-...">
+                  </div>
+                </div>
+              </div>
+              <div id="profile-editor-opencode-options" class="hidden space-y-3">
+                <div>
+                  <label class="block text-xs font-medium text-gray-300 mb-1">Config Path <span class="text-gray-500">(optional)</span></label>
+                  <input type="text" id="profile-editor-opencode-config" class="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm focus:outline-none focus:border-purple-500" placeholder="Path to opencode.json">
+                </div>
+              </div>
+              <div class="flex gap-2">
+                <button type="button" id="btn-save-profile" class="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded text-xs">Save</button>
+                <button type="button" id="btn-cancel-profile" class="bg-gray-600 hover:bg-gray-500 text-white px-3 py-1 rounded text-xs">Cancel</button>
+              </div>
             </div>
           </div>
 
@@ -3623,6 +3691,7 @@
   <script src="/js/modules/inventify-module.js"></script>
   <script src="/js/modules/agent-controls-module.js"></script>
   <script src="/js/modules/docker-module.js"></script>
+  <script src="/js/modules/agent-profiles-module.js"></script>
   <!-- Main application -->
   <script src="/js/app.js"></script>
 </body>

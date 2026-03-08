@@ -74,6 +74,8 @@ export interface ProjectStatus {
   slackNotification?: SlackNotificationConfig | null;
   /** Slack channel linked to this project for feed updates */
   slackLinkedChannelId?: string | null;
+  /** Agent profile ID override (null = use default profile) */
+  agentProfileId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -122,6 +124,7 @@ export interface ProjectRepository {
   updateDockerImage(id: string, dockerImage: string | null): Promise<ProjectStatus | null>;
   updateSlackNotification(id: string, config: SlackNotificationConfig | null): Promise<ProjectStatus | null>;
   updateSlackLinkedChannel(id: string, channelId: string | null): Promise<ProjectStatus | null>;
+  updateAgentProfileId(id: string, profileId: string | null): Promise<ProjectStatus | null>;
   updateProjectPath(id: string, newName: string, newPath: string): Promise<ProjectStatus | null>;
   delete(id: string): Promise<boolean>;
 }
@@ -552,6 +555,18 @@ export class FileProjectRepository implements ProjectRepository {
     }
 
     status.slackLinkedChannelId = channelId;
+    this.saveStatus(status);
+    return Promise.resolve({ ...status });
+  }
+
+  updateAgentProfileId(id: string, profileId: string | null): Promise<ProjectStatus | null> {
+    const status = this.loadStatus(id);
+
+    if (!status) {
+      return Promise.resolve(null);
+    }
+
+    status.agentProfileId = profileId;
     this.saveStatus(status);
     return Promise.resolve({ ...status });
   }

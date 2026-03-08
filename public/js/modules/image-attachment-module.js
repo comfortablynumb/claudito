@@ -49,33 +49,90 @@
     }
   }
 
+  function formatSize(bytes) {
+    var kb = Math.round(bytes / 1024);
+    return kb > 1024 ? (kb / 1024).toFixed(1) + ' MB' : kb + ' KB';
+  }
+
+  var MAX_DIMENSION = 768;
+  var JPEG_QUALITY = 0.7;
+  var MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB raw input limit
+
+  /**
+   * Compress an image using Canvas API.
+   * Resizes to fit within MAX_DIMENSION and converts to JPEG.
+   * @param {string} dataUrl - Original image data URL
+   * @param {Function} callback - Called with { dataUrl, mimeType, size }
+   */
+  function compressImage(dataUrl, callback) {
+    var img = new Image();
+
+    img.onload = function() {
+      var width = img.width;
+      var height = img.height;
+
+      // Scale down if exceeds max dimension
+      if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
+        var ratio = Math.min(MAX_DIMENSION / width, MAX_DIMENSION / height);
+        width = Math.round(width * ratio);
+        height = Math.round(height * ratio);
+      }
+
+      var canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+
+      var ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+
+      var compressedUrl = canvas.toDataURL('image/jpeg', JPEG_QUALITY);
+      // Estimate compressed size from base64 length
+      var base64Data = compressedUrl.split(',')[1] || '';
+      var compressedSize = Math.round(base64Data.length * 0.75);
+
+      callback({
+        dataUrl: compressedUrl,
+        mimeType: 'image/jpeg',
+        size: compressedSize
+      });
+    };
+
+    img.onerror = function() {
+      showToast('Failed to compress image', 'error');
+    };
+
+    img.src = dataUrl;
+  }
+
   /**
    * Process an image file for attachment
    * @param {File} file - Image file to process
    */
   function processFile(file) {
-    // Limit file size to 5MB
-    var maxSize = 5 * 1024 * 1024;
-
-    if (file.size > maxSize) {
-      showToast('Image too large (max 5MB)', 'error');
+    if (file.size > MAX_FILE_SIZE) {
+      showToast('Image too large (max 10MB)', 'error');
       return;
     }
 
     var reader = new FileReader();
 
     reader.onload = function(e) {
-      var dataUrl = e.target.result;
-      var imageId = 'img-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+      var originalDataUrl = e.target.result;
+      var originalSize = file.size;
 
-      state.pendingImages.push({
-        id: imageId,
-        dataUrl: dataUrl,
-        mimeType: file.type,
-        size: file.size
+      compressImage(originalDataUrl, function(compressed) {
+        var imageId = 'img-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+
+        state.pendingImages.push({
+          id: imageId,
+          dataUrl: compressed.dataUrl,
+          mimeType: compressed.mimeType,
+          size: compressed.size,
+          originalSize: originalSize
+        });
+
+        renderPreviews();
       });
-
-      renderPreviews();
     };
 
     reader.onerror = function() {
@@ -102,8 +159,11 @@
     $previews.empty();
 
     state.pendingImages.forEach(function(img) {
-      var sizeKB = Math.round(img.size / 1024);
-      var sizeText = sizeKB > 1024 ? (sizeKB / 1024).toFixed(1) + ' MB' : sizeKB + ' KB';
+      var sizeText = formatSize(img.size);
+
+      if (img.originalSize && img.originalSize !== img.size) {
+        sizeText = formatSize(img.originalSize) + ' → ' + sizeText;
+      }
 
       var html = '<div class="image-preview-item" data-image-id="' + img.id + '">' +
         '<img src="' + img.dataUrl + '" alt="Preview">' +

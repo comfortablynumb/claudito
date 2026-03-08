@@ -4,7 +4,7 @@ import {
   Conversation,
   generateConversationId,
 } from '../../../src/repositories/conversation';
-import { AgentMessage } from '../../../src/agents/claude-agent';
+import { AgentMessage } from '../../../src/agents/agent';
 import {
   createMockConversationFileSystem,
   createMockProjectPathResolver,

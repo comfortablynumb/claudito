@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-const FileBrowser = require('../../public/js/modules/file-browser');
+const FileBrowser = require('../../public/js/modules/file-browser-v2');
 
 describe('FileBrowser', () => {
   let mockState;
@@ -25,6 +25,7 @@ describe('FileBrowser', () => {
       val: jest.fn().mockReturnThis(),
       text: jest.fn().mockReturnThis(),
       on: jest.fn().mockReturnThis(),
+      off: jest.fn().mockReturnThis(),
       find: jest.fn().mockReturnThis(),
       first: jest.fn().mockReturnThis(),
       next: jest.fn().mockReturnThis(),
@@ -33,12 +34,18 @@ describe('FileBrowser', () => {
       addClass: jest.fn().mockReturnThis(),
       removeClass: jest.fn().mockReturnThis(),
       toggleClass: jest.fn().mockReturnThis(),
+      hasClass: jest.fn().mockReturnValue(false),
       css: jest.fn().mockReturnValue('0px'),
+      attr: jest.fn().mockReturnThis(),
       data: jest.fn(),
+      each: jest.fn().mockReturnThis(),
       scrollTop: jest.fn().mockReturnThis(),
       scrollLeft: jest.fn().mockReturnThis(),
       focus: jest.fn().mockReturnThis(),
       closest: jest.fn().mockReturnValue({ length: 0 }),
+      position: jest.fn().mockReturnValue({ top: 0, left: 0 }),
+      width: jest.fn().mockReturnValue(200),
+      height: jest.fn().mockReturnValue(400),
       length: 1
     };
 
@@ -477,41 +484,25 @@ describe('FileBrowser', () => {
   });
 
   describe('setupHandlers', () => {
-    it('should register file tree item click handler', () => {
+    it('should register click handlers on document', () => {
       FileBrowser.setupHandlers();
 
+      // V2 uses addEventListener(document, eventName, handler) which falls back to
+      // $(document).on(document, eventName, handler)
       expect(global.$).toHaveBeenCalledWith(document);
-      expect(global.$().on).toHaveBeenCalledWith('click', '.file-tree-item', expect.any(Function));
+      expect(global.$().on).toHaveBeenCalledWith(document, 'click', expect.any(Function));
     });
 
-    it('should register delete button click handler', () => {
+    it('should register contextmenu handler on document', () => {
       FileBrowser.setupHandlers();
 
-      expect(global.$().on).toHaveBeenCalledWith('click', '.btn-delete-file', expect.any(Function));
+      expect(global.$().on).toHaveBeenCalledWith(document, 'contextmenu', expect.any(Function));
     });
 
-    it('should register context menu handler', () => {
+    it('should register mousedown handler on document', () => {
       FileBrowser.setupHandlers();
 
-      expect(global.$().on).toHaveBeenCalledWith('contextmenu', '.file-tree-item', expect.any(Function));
-    });
-
-    it('should register file tab click handler', () => {
-      FileBrowser.setupHandlers();
-
-      expect(global.$().on).toHaveBeenCalledWith('click', '.file-tab', expect.any(Function));
-    });
-
-    it('should register tab close button handler', () => {
-      FileBrowser.setupHandlers();
-
-      expect(global.$().on).toHaveBeenCalledWith('click', '.tab-close', expect.any(Function));
-    });
-
-    it('should register middle-click on tab handler', () => {
-      FileBrowser.setupHandlers();
-
-      expect(global.$().on).toHaveBeenCalledWith('mousedown', '.file-tab', expect.any(Function));
+      expect(global.$().on).toHaveBeenCalledWith(document, 'mousedown', expect.any(Function));
     });
 
     it('should register file editor input handler', () => {

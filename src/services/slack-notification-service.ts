@@ -4,7 +4,7 @@ import { SlackService } from './slack-service';
 import { SlackThreadTracker } from './slack-thread-tracker';
 import { SettingsRepository } from '../repositories/settings';
 import { ProjectRepository, SlackNotificationConfig, SlackNotificationEvent } from '../repositories/project';
-import { WaitingStatus, AgentStatus } from '../agents/claude-agent';
+import { WaitingStatus, AgentStatus } from '../agents/agent';
 import { MilestoneRef } from '../agents/autonomous-loop-orchestrator';
 import { getLogger, Logger } from '../utils';
 

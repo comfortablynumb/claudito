@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { SettingsRepository, ClaudePermissions, PromptTemplate, McpServerConfig, SlackSettings } from '../repositories';
+import { SettingsRepository, ClaudePermissions, PromptTemplate, McpServerConfig, SlackSettings, AgentProfile } from '../repositories';
 import { DataWipeService } from '../services/data-wipe-service';
 import { SlackService } from '../services/slack-service';
 import { DockerSettings } from '../services/docker/types';
@@ -23,6 +23,7 @@ interface UpdateSettingsBody {
   chromeEnabled?: boolean;
   inventifyFolder?: string;
   docker?: Partial<DockerSettings>;
+  agentProfiles?: AgentProfile[];
 }
 
 export interface SettingsChangeEvent {
@@ -99,7 +100,7 @@ export function createSettingsRouter(deps: SettingsRouterDependencies): Router {
 
   router.put('/', asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const body = req.body as UpdateSettingsBody;
-    const { maxConcurrentAgents, claudePermissions, agentPromptTemplate, sendWithCtrlEnter, historyLimit, enableDesktopNotifications, appendSystemPrompt, promptTemplates, mcp, slack, chromeEnabled, inventifyFolder, docker } = body;
+    const { maxConcurrentAgents, claudePermissions, agentPromptTemplate, sendWithCtrlEnter, historyLimit, enableDesktopNotifications, appendSystemPrompt, promptTemplates, mcp, slack, chromeEnabled, inventifyFolder, docker, agentProfiles } = body;
 
     if (maxConcurrentAgents !== undefined && (typeof maxConcurrentAgents !== 'number' || maxConcurrentAgents < 1)) {
       throw new ValidationError('maxConcurrentAgents must be a positive number');
@@ -121,6 +122,10 @@ export function createSettingsRouter(deps: SettingsRouterDependencies): Router {
 
     if (docker) {
       validateDockerSettings(docker);
+    }
+
+    if (agentProfiles !== undefined) {
+      validateAgentProfiles(agentProfiles);
     }
 
     if (slack?.botToken && slack.botToken.trim()) {
@@ -167,6 +172,7 @@ export function createSettingsRouter(deps: SettingsRouterDependencies): Router {
       chromeEnabled,
       inventifyFolder,
       docker,
+      agentProfiles,
     });
 
     // Notify about settings changes
@@ -284,6 +290,98 @@ function validateDockerSettings(docker: Partial<DockerSettings>): void {
 
   if (docker.resourceLimits) {
     validateDockerResourceLimits(docker.resourceLimits);
+  }
+}
+
+const VALID_PROVIDERS = ['anthropic', 'opencode'];
+const VALID_RUNTIMES = ['claude-binary', 'sdk'];
+const VALID_AUTH_MODES = ['api-key', 'pro-plan'];
+
+function validateAgentProfiles(profiles: unknown): void {
+  if (!Array.isArray(profiles)) {
+    throw new ValidationError('agentProfiles must be an array');
+  }
+
+  if (profiles.length === 0) {
+    throw new ValidationError('At least one agent profile is required');
+  }
+
+  const seenIds = new Set<string>();
+  let defaultCount = 0;
+
+  for (const profile of profiles) {
+    if (typeof profile !== 'object' || profile === null) {
+      throw new ValidationError('Each profile must be an object');
+    }
+
+    const p = profile as Record<string, unknown>;
+
+    if (typeof p.id !== 'string' || p.id.trim().length === 0) {
+      throw new ValidationError('Each profile must have a non-empty id');
+    }
+
+    if (seenIds.has(p.id)) {
+      throw new ValidationError(`Duplicate profile id: ${p.id}`);
+    }
+    seenIds.add(p.id);
+
+    if (typeof p.name !== 'string' || p.name.trim().length === 0) {
+      throw new ValidationError('Each profile must have a non-empty name');
+    }
+
+    if (!VALID_PROVIDERS.includes(p.provider as string)) {
+      throw new ValidationError('Profile provider must be "anthropic" or "opencode"');
+    }
+
+    if (p.isDefault === true) {
+      defaultCount++;
+    }
+
+    if (p.provider === 'anthropic') {
+      validateAnthropicConfig(p.anthropicConfig);
+    } else if (p.provider === 'opencode') {
+      validateOpencodeConfig(p.opencodeConfig);
+    }
+  }
+
+  if (defaultCount !== 1) {
+    throw new ValidationError('Exactly one profile must be marked as default');
+  }
+}
+
+function validateAnthropicConfig(config: unknown): void {
+  if (typeof config !== 'object' || config === null) {
+    throw new ValidationError('anthropicConfig is required');
+  }
+
+  const c = config as Record<string, unknown>;
+
+  if (!VALID_RUNTIMES.includes(c.runtime as string)) {
+    throw new ValidationError('anthropicConfig.runtime must be "claude-binary" or "sdk"');
+  }
+
+  if (c.runtime === 'sdk') {
+    if (c.authMode !== undefined && !VALID_AUTH_MODES.includes(c.authMode as string)) {
+      throw new ValidationError('anthropicConfig.authMode must be "api-key" or "pro-plan"');
+    }
+
+    if (c.authMode === 'api-key' && (typeof c.apiKey !== 'string' || c.apiKey.trim().length === 0)) {
+      throw new ValidationError('API key is required when authMode is "api-key"');
+    }
+  }
+}
+
+function validateOpencodeConfig(config: unknown): void {
+  if (config !== undefined && config !== null && typeof config !== 'object') {
+    throw new ValidationError('opencodeConfig must be an object if provided');
+  }
+
+  if (config && typeof config === 'object') {
+    const c = config as Record<string, unknown>;
+
+    if (c.configPath !== undefined && typeof c.configPath !== 'string') {
+      throw new ValidationError('opencodeConfig.configPath must be a string');
+    }
   }
 }
 

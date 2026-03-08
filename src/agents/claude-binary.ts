@@ -8,6 +8,13 @@ import { ProcessManager, ProcessSpawner } from './process-manager';
 import { StreamHandler } from './stream-handler';
 import { MessageBuilder } from './message-builder';
 import {
+  Agent,
+  AgentEvents,
+  PermissionConfig,
+  AgentLimits,
+  AgentStreamingOptions,
+} from './agent';
+import {
   AgentStatus,
   AgentMode,
   AgentMessage,
@@ -17,89 +24,7 @@ import {
   PermissionRequest,
 } from './types';
 
-// Re-export types from types file that are part of the public API
-export {
-  AgentStatus,
-  AgentMode,
-  ToolUseInfo,
-  QuestionInfo,
-  PermissionRequest,
-  PlanModeInfo,
-  ResultInfo,
-  StatusChangeInfo,
-  AgentMessage,
-  WaitingStatus,
-  ContextUsage,
-  ProcessInfo,
-} from './types';
-
-// Export ProcessSpawner type for testing
-export { ProcessSpawner } from './process-manager';
-
-export interface ClaudeAgent {
-  readonly projectId: string;
-  readonly status: AgentStatus;
-  readonly mode: AgentMode;
-  readonly lastCommand: string | null;
-  readonly processInfo: ProcessInfo | null;
-  readonly collectedOutput: string;
-  readonly contextUsage: ContextUsage | null;
-  readonly queuedMessageCount: number;
-  readonly queuedMessages: string[];
-  readonly isWaitingForInput: boolean;
-  readonly waitingVersion: number;
-  readonly sessionId: string | null;
-  readonly sessionError: string | null;
-  readonly permissionMode: 'acceptEdits' | 'plan' | null;
-  start(instructions: string): void;
-  stop(): Promise<void>;
-  sendInput(input: string): void;
-  sendToolResult(toolUseId: string, content: string): void;
-  removeQueuedMessage(index: number): boolean;
-  on<K extends keyof ClaudeAgentEvents>(event: K, listener: ClaudeAgentEvents[K]): void;
-  off<K extends keyof ClaudeAgentEvents>(event: K, listener: ClaudeAgentEvents[K]): void;
-}
-
-export interface ClaudeAgentEvents {
-  message: (message: AgentMessage) => void;
-  status: (status: AgentStatus) => void;
-  exit: (code: number | null) => void;
-  waitingForInput: (status: WaitingStatus) => void;
-  sessionNotFound: (sessionId: string) => void;
-  exitPlanMode: (planContent: string) => void;
-  enterPlanMode: () => void;
-}
-
-// Export alias for backward compatibility
-export type AgentEvents = ClaudeAgentEvents;
-
-export interface PermissionConfig {
-  skipPermissions: boolean;
-  allowedTools?: string[];
-  disallowedTools?: string[];
-  permissionMode?: 'acceptEdits' | 'plan';
-  appendSystemPrompt?: string;
-}
-
-export interface AgentLimits {
-  /** Maximum number of agentic turns before stopping (print mode only) */
-  maxTurns?: number;
-  /** Maximum context tokens to use */
-  contextTokens?: number;
-  /** Total budget in USD */
-  totalBudget?: number;
-}
-
-export interface AgentStreamingOptions {
-  /** Include partial streaming events in output (requires stream-json output) */
-  includePartialMessages?: boolean;
-  /** Disable session persistence - sessions won't be saved to disk */
-  noSessionPersistence?: boolean;
-  /** Cache anything for improved performance */
-  cacheAnything?: boolean;
-}
-
-export interface ClaudeAgentConfig {
+export interface ClaudeBinaryConfig {
   projectId: string;
   projectPath: string;
   mode?: AgentMode;
@@ -123,7 +48,7 @@ export interface ClaudeAgentConfig {
   chromeEnabled?: boolean;
 }
 
-export interface ClaudeAgentStartOptions {
+export interface ClaudeBinaryStartOptions {
   initialMessage?: string;
   images?: Array<{ data: string; mediaType: string }>;
   sessionId?: string;
@@ -139,7 +64,7 @@ export interface ClaudeAgentStartOptions {
 // Claude Code uses 200k token context by default
 const DEFAULT_MAX_CONTEXT_TOKENS = 200000;
 
-export class DefaultClaudeAgent implements ClaudeAgent {
+export class ClaudeBinary implements Agent {
   readonly projectId: string;
   private readonly projectPath: string;
   private readonly _mode: AgentMode;
@@ -169,7 +94,7 @@ export class DefaultClaudeAgent implements ClaudeAgent {
   private _mcpConfigPath: string | null = null;
   private answeredToolIds = new Set<string>();
 
-  constructor(config: ClaudeAgentConfig) {
+  constructor(config: ClaudeBinaryConfig) {
     this.projectId = config.projectId;
     this.projectPath = config.projectPath;
     this._mode = config.mode || 'interactive';
@@ -179,7 +104,7 @@ export class DefaultClaudeAgent implements ClaudeAgent {
     this._limits = config.limits ?? {};
     this._streaming = config.streaming ?? {};
     this.emitter = new EventEmitter();
-    this.logger = getLogger('ClaudeAgent').withProject(config.projectId);
+    this.logger = getLogger('ClaudeBinary').withProject(config.projectId);
     this._configuredSessionId = config.sessionId || null;
     this._isNewSession = config.isNewSession ?? true;
     this._model = config.model;
@@ -263,7 +188,7 @@ export class DefaultClaudeAgent implements ClaudeAgent {
     });
   }
 
-  startWithOptions(options: ClaudeAgentStartOptions): void {
+  startWithOptions(options: ClaudeBinaryStartOptions): void {
     this.validateStart();
     this.initializeForStart(options);
 
@@ -278,19 +203,13 @@ export class DefaultClaudeAgent implements ClaudeAgent {
     }
   }
 
-  /**
-   * Validate that the agent can be started.
-   */
   private validateStart(): void {
     if (this.processManager.isRunning()) {
       throw new Error('Agent is already running');
     }
   }
 
-  /**
-   * Initialize agent state for starting.
-   */
-  private initializeForStart(options: ClaudeAgentStartOptions): void {
+  private initializeForStart(options: ClaudeBinaryStartOptions): void {
     this.logger.info('Starting Claude agent', {
       mode: this._mode,
       sessionId: options.sessionId,
@@ -315,10 +234,7 @@ export class DefaultClaudeAgent implements ClaudeAgent {
     }
   }
 
-  /**
-   * Prepare command arguments and environment.
-   */
-  private prepareCommand(options: ClaudeAgentStartOptions): { args: string[], env: Record<string, string> } {
+  private prepareCommand(options: ClaudeBinaryStartOptions): { args: string[], env: Record<string, string> } {
     const args = this.buildCommandArgs(options);
     const env = this.buildEnvironment();
     this._lastCommand = `claude ${args.join(' ')}`;
@@ -328,9 +244,6 @@ export class DefaultClaudeAgent implements ClaudeAgent {
     return { args, env };
   }
 
-  /**
-   * Spawn the Claude process.
-   */
   private spawnClaudeProcess(args: string[], env: Record<string, string>): ChildProcess {
     const process = this.processManager.spawn('claude', args, this.projectPath, env);
     this.setupStreamProcessing(process);
@@ -338,10 +251,7 @@ export class DefaultClaudeAgent implements ClaudeAgent {
     return process;
   }
 
-  /**
-   * Handle post-start tasks.
-   */
-  private handlePostStart(options: ClaudeAgentStartOptions, _process: ChildProcess): void {
+  private handlePostStart(options: ClaudeBinaryStartOptions, _process: ChildProcess): void {
     // Send initial message via stdin (both modes use stream-json format)
     if (options.initialMessage && options.initialMessage.trim()) {
       this.logger.info('Sending initial message', {
@@ -444,16 +354,16 @@ export class DefaultClaudeAgent implements ClaudeAgent {
     return true;
   }
 
-  on<K extends keyof ClaudeAgentEvents>(
+  on<K extends keyof AgentEvents>(
     event: K,
-    listener: ClaudeAgentEvents[K]
+    listener: AgentEvents[K]
   ): void {
     this.emitter.on(event, listener);
   }
 
-  off<K extends keyof ClaudeAgentEvents>(
+  off<K extends keyof AgentEvents>(
     event: K,
-    listener: ClaudeAgentEvents[K]
+    listener: AgentEvents[K]
   ): void {
     this.emitter.off(event, listener);
   }
@@ -475,6 +385,7 @@ export class DefaultClaudeAgent implements ClaudeAgent {
 
       // Extract session ID from messages
       const sessionId = MessageBuilder.extractSessionId(message.content);
+
       if (sessionId && !this._sessionId) {
         this._sessionId = sessionId;
         this.logger.info('Session ID detected', { sessionId });
@@ -684,7 +595,7 @@ export class DefaultClaudeAgent implements ClaudeAgent {
     }
   }
 
-  private buildCommandArgs(options: ClaudeAgentStartOptions): string[] {
+  private buildCommandArgs(options: ClaudeBinaryStartOptions): string[] {
     const message = options.initialMessage
       ? MessageBuilder.buildUserMessage(options.initialMessage, options.images)
       : undefined;

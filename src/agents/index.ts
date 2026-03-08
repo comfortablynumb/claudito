@@ -1,4 +1,7 @@
-export * from './claude-agent';
+export * from './agent';
+export * from './claude-binary';
+export { AnthropicSdkAgent, AnthropicSdkAgentConfig } from './anthropic-sdk-agent';
+export { OpencodeAgent, OpencodeAgentConfig } from './opencode-agent';
 export { CommandEntry } from './types';
 export {
   AgentManager,

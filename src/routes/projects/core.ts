@@ -5,7 +5,7 @@ import { asyncHandler, NotFoundError, ValidationError, getProjectLogs } from '..
 import { isPathWithinProject } from '../../utils/path-validator';
 import { SUPPORTED_MODELS, isValidModel, getModelDisplayName, DEFAULT_MODEL } from '../../config/models';
 import { getAgentManager, getProcessTracker, getRalphLoopService, getWebSocketServer } from '../index';
-import { generateIdFromPath } from '../../repositories';
+import { generateIdFromPath, AgentProfile, DEFAULT_AGENT_PROFILE } from '../../repositories';
 import {
   ProjectRouterDependencies,
   CreateProjectBody,
@@ -32,6 +32,18 @@ import {
   saveClaudeFileSchema,
   projectIdSchema
 } from './schemas';
+
+function resolveEffectiveProfile(profiles: AgentProfile[], profileId?: string | null): AgentProfile {
+  if (profileId) {
+    const found = profiles.find(p => p.id === profileId);
+
+    if (found) return found;
+  }
+
+  // Fall back to default profile
+  const defaultProfile = profiles.find(p => p.isDefault);
+  return defaultProfile || profiles[0] || DEFAULT_AGENT_PROFILE;
+}
 
 export function createCoreRouter(deps: ProjectRouterDependencies): Router {
   const router = Router();
@@ -453,6 +465,53 @@ export function createCoreRouter(deps: ProjectRouterDependencies): Router {
     res.json({
       dockerOverride,
       dockerImage,
+      updated: true,
+    });
+  }));
+
+  // Get project agent profile
+  router.get('/:id/agent-profile', validateParams(projectIdSchema), projectExistsMiddleware, asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const id = req.params['id'] as string;
+    const project = (await projectRepository.findById(id))!;
+    const settings = await settingsRepository.get();
+    const profiles = settings.agentProfiles || [];
+
+    const effectiveProfile = resolveEffectiveProfile(profiles, project.agentProfileId);
+
+    res.json({
+      agentProfileId: project.agentProfileId ?? null,
+      effectiveProfile,
+    });
+  }));
+
+  // Set project agent profile
+  router.put('/:id/agent-profile', validateParams(projectIdSchema), projectExistsMiddleware, asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const id = req.params['id'] as string;
+    const body = req.body as { profileId: string | null };
+    const { profileId } = body;
+
+    if (profileId !== null) {
+      if (typeof profileId !== 'string' || profileId.trim().length === 0) {
+        throw new ValidationError('profileId must be a non-empty string or null');
+      }
+
+      // Validate the profile exists in settings
+      const settings = await settingsRepository.get();
+      const profiles = settings.agentProfiles || [];
+      const exists = profiles.some(p => p.id === profileId);
+
+      if (!exists) {
+        throw new ValidationError(`Profile not found: ${profileId}`);
+      }
+    }
+
+    await projectRepository.updateAgentProfileId(id, profileId);
+    const settings = await settingsRepository.get();
+    const effectiveProfile = resolveEffectiveProfile(settings.agentProfiles || [], profileId);
+
+    res.json({
+      agentProfileId: profileId,
+      effectiveProfile,
       updated: true,
     });
   }));

@@ -1,4 +1,4 @@
-import { AgentMessage, AgentMode } from './claude-agent';
+import { AgentMessage, AgentMode } from './agent';
 import { McpServerConfig } from '../repositories/settings';
 import * as fs from 'fs';
 import * as path from 'path';

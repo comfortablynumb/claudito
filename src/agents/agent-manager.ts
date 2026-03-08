@@ -2,8 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { generateUUID } from '../utils/uuid';
 import {
-  ClaudeAgent,
-  DefaultClaudeAgent,
+  Agent,
   AgentMessage,
   AgentStatus,
   AgentMode,
@@ -15,7 +14,10 @@ import {
   WaitingStatus,
   ProcessSpawner,
   ToolUseInfo,
-} from './claude-agent';
+} from './agent';
+import { ClaudeBinary } from './claude-binary';
+import { AnthropicSdkAgent } from './anthropic-sdk-agent';
+import { OpencodeAgent } from './opencode-agent';
 import { CommandEntry } from './types';
 import { defaultSpawner } from './process-manager';
 import { DefaultPermissionGenerator, PermissionGenerator } from '../services/permission-generator';
@@ -26,6 +28,8 @@ import {
   McpServerConfig,
   McpOverrides,
   ProjectStatus,
+  AgentProfile,
+  DEFAULT_AGENT_PROFILE,
 } from '../repositories';
 import { InstructionGenerator, RoadmapParser } from '../services';
 import { ContainerManager } from '../services/docker/types';
@@ -202,14 +206,28 @@ export interface AgentFactoryOptions {
   chromeEnabled?: boolean;
   /** Custom process spawner (e.g., DockerProcessSpawner for sandboxed execution) */
   processSpawner?: ProcessSpawner;
+  /** Resolved agent profile (provider + runtime config) */
+  agentProfile?: AgentProfile;
 }
 
 export interface AgentFactory {
-  create(options: AgentFactoryOptions): ClaudeAgent;
+  create(options: AgentFactoryOptions): Agent;
 }
 
 const defaultAgentFactory: AgentFactory = {
-  create: (options) => new DefaultClaudeAgent(options),
+  create: (options) => {
+    if (options.agentProfile?.provider === 'opencode') {
+      return new OpencodeAgent(options);
+    }
+
+    const runtime = options.agentProfile?.anthropicConfig?.runtime ?? 'claude-binary';
+
+    if (runtime === 'sdk') {
+      return new AnthropicSdkAgent(options);
+    }
+
+    return new ClaudeBinary(options);
+  },
 };
 
 export interface AgentManagerDependencies {
@@ -233,8 +251,8 @@ type EventListeners = {
  * Refactored to use focused modules for queue, session, loop, and process management.
  */
 export class DefaultAgentManager implements AgentManager {
-  private readonly agents: Map<string, ClaudeAgent> = new Map();
-  private readonly oneOffAgents: Map<string, ClaudeAgent> = new Map();
+  private readonly agents: Map<string, Agent> = new Map();
+  private readonly oneOffAgents: Map<string, Agent> = new Map();
   private readonly oneOffMeta: Map<string, OneOffMeta> = new Map();
   private readonly agentQueue: AgentQueue;
   private readonly sessionManager: SessionManager;
@@ -440,6 +458,9 @@ export class DefaultAgentManager implements AgentManager {
       effectiveSessionResult = await this.sessionManager.getOrCreateSession(projectId, undefined, true);
     }
 
+    // Resolve agent profile
+    const agentProfile = await this.resolveProfileForProject(projectId);
+
     // Create agent
     const agent = this.agentFactory.create({
       projectId,
@@ -452,6 +473,7 @@ export class DefaultAgentManager implements AgentManager {
       mcpServers,
       chromeEnabled: settings.chromeEnabled ?? false,
       processSpawner: dockerResult.processSpawner,
+      agentProfile,
     });
 
     // Store agent
@@ -1003,6 +1025,8 @@ export class DefaultAgentManager implements AgentManager {
       this.emit('dockerFallbackWarning', options.projectId, dockerResult.dockerFallbackReason || 'Unknown error');
     }
 
+    const agentProfile = await this.resolveProfileForProject(options.projectId);
+
     const agent = this.agentFactory.create({
       projectId: options.projectId,
       projectPath: project.path,
@@ -1011,6 +1035,7 @@ export class DefaultAgentManager implements AgentManager {
       model,
       chromeEnabled: settings.chromeEnabled ?? false,
       processSpawner: dockerResult.processSpawner,
+      agentProfile,
     });
 
     this.oneOffAgents.set(oneOffId, agent);
@@ -1120,7 +1145,7 @@ export class DefaultAgentManager implements AgentManager {
     return this.cliCommandHistory.get(projectId) ?? [];
   }
 
-  private setupOneOffAgentListeners(oneOffId: string, agent: ClaudeAgent): void {
+  private setupOneOffAgentListeners(oneOffId: string, agent: Agent): void {
     agent.on('message', (message: AgentMessage) => {
       if (message.type === 'tool_use' && message.toolInfo?.name === 'Bash') {
         const meta = this.oneOffMeta.get(oneOffId);
@@ -1260,6 +1285,8 @@ export class DefaultAgentManager implements AgentManager {
       this.emit('dockerFallbackWarning', projectId, dockerResult.dockerFallbackReason || 'Unknown error');
     }
 
+    const agentProfile = await this.resolveProfileForProject(projectId);
+
     const agent = this.agentFactory.create({
       projectId,
       projectPath: project.path,
@@ -1271,6 +1298,7 @@ export class DefaultAgentManager implements AgentManager {
       mcpServers,
       chromeEnabled: settings.chromeEnabled ?? false,
       processSpawner: dockerResult.processSpawner,
+      agentProfile,
     });
 
     this.agents.set(projectId, agent);
@@ -1330,6 +1358,20 @@ export class DefaultAgentManager implements AgentManager {
     return project.modelOverride;
   }
 
+  private async resolveProfileForProject(projectId: string): Promise<AgentProfile> {
+    const project = await this.projectRepository.findById(projectId);
+    const settings = await this.settingsRepository.get();
+    const profiles = settings.agentProfiles || [];
+
+    if (project?.agentProfileId) {
+      const found = profiles.find(p => p.id === project.agentProfileId);
+
+      if (found) return found;
+    }
+
+    return profiles.find(p => p.isDefault) || profiles[0] || DEFAULT_AGENT_PROFILE;
+  }
+
   private trackMessageSave<T>(promise: Promise<T>): Promise<T> {
     this.pendingMessageSaves.add(promise);
     void promise.finally(() => this.pendingMessageSaves.delete(promise));
@@ -1345,7 +1387,7 @@ export class DefaultAgentManager implements AgentManager {
     await this.conversationRepository.flush();
   }
 
-  private setupAgentListeners(agent: ClaudeAgent): void {
+  private setupAgentListeners(agent: Agent): void {
     const projectId = agent.projectId;
 
     const messageListener = (message: AgentMessage): void => {
@@ -1421,7 +1463,7 @@ export class DefaultAgentManager implements AgentManager {
     agent.on('enterPlanMode', enterPlanModeListener);
   }
 
-  private async handleAgentExit(agent: ClaudeAgent, _code: number | null): Promise<void> {
+  private async handleAgentExit(agent: Agent, _code: number | null): Promise<void> {
     const projectId = agent.projectId;
 
     // Clean up agent
@@ -1481,7 +1523,7 @@ export class DefaultAgentManager implements AgentManager {
     }
   }
 
-  private handleExitPlanMode(agent: ClaudeAgent, planContent: string): void {
+  private handleExitPlanMode(agent: Agent, planContent: string): void {
     const projectId = agent.projectId;
     const sessionId = agent.sessionId;
 
@@ -1536,7 +1578,7 @@ export class DefaultAgentManager implements AgentManager {
     this.emit('waitingForInput', projectId, { isWaiting: true, version: waitingVersion });
   }
 
-  private async handleEnterPlanMode(agent: ClaudeAgent): Promise<void> {
+  private async handleEnterPlanMode(agent: Agent): Promise<void> {
     const projectId = agent.projectId;
     const sessionId = agent.sessionId;
 
@@ -1617,7 +1659,7 @@ export class DefaultAgentManager implements AgentManager {
     }
   }
 
-  private async handleSessionNotFound(agent: ClaudeAgent, missingSessionId: string): Promise<void> {
+  private async handleSessionNotFound(agent: Agent, missingSessionId: string): Promise<void> {
     const projectId = agent.projectId;
 
     this.logger.warn('Session not found by Claude, recovering', {

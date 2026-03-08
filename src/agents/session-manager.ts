@@ -3,7 +3,7 @@ import {
   ProjectRepository,
   ConversationRepository,
 } from '../repositories';
-import { ContextUsage } from './claude-agent';
+import { ContextUsage } from './agent';
 
 export interface SessionRecoveryResult {
   conversationId: string;

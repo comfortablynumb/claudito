@@ -2,7 +2,7 @@ import { EventEmitter } from 'events';
 import { ChildProcess } from 'child_process';
 import { randomUUID } from 'crypto';
 import { FilesystemService, DriveInfo, DirectoryEntry } from '../../../src/routes/filesystem';
-import { SettingsRepository, GlobalSettings, SettingsUpdate, ClaudePermissions } from '../../../src/repositories/settings';
+import { SettingsRepository, GlobalSettings, SettingsUpdate, ClaudePermissions, DEFAULT_AGENT_PROFILE } from '../../../src/repositories/settings';
 import {
   ProjectRepository,
   ProjectStatus,
@@ -23,14 +23,14 @@ import {
   ProjectPathResolver,
 } from '../../../src/repositories/interfaces';
 import {
-  ClaudeAgent,
+  Agent,
   AgentStatus,
   AgentMode,
   AgentMessage,
   ContextUsage,
   AgentEvents,
   ProcessSpawner,
-} from '../../../src/agents/claude-agent';
+} from '../../../src/agents/agent';
 import { AgentFactory, AgentFactoryOptions } from '../../../src/agents/agent-manager';
 import {
   InstructionGenerator,
@@ -100,6 +100,7 @@ export const DEFAULT_TEST_SETTINGS: GlobalSettings = {
     resourceLimits: { cpus: 2.0, memoryMb: 4096 },
     networkMode: 'bridge',
   },
+  agentProfiles: [{ ...DEFAULT_AGENT_PROFILE }],
 };
 
 export const DEFAULT_CLAUDE_PERMISSIONS: ClaudePermissions = {
@@ -428,6 +429,13 @@ export function createMockProjectRepository(
       project.updatedAt = new Date().toISOString();
       return Promise.resolve({ ...project });
     }),
+    updateAgentProfileId: jest.fn().mockImplementation((id: string, profileId: string | null) => {
+      const project = projects.get(id);
+      if (!project) return Promise.resolve(null);
+      project.agentProfileId = profileId;
+      project.updatedAt = new Date().toISOString();
+      return Promise.resolve({ ...project });
+    }),
     // Extra method for path resolution
     getProjectPath: jest.fn().mockImplementation((id: string) => {
       const project = projects.get(id);
@@ -656,7 +664,7 @@ export function createMockProcessSpawner(
 // Claude Agent Mock
 // ============================================================================
 
-export function createMockClaudeAgent(projectId = 'test-project'): jest.Mocked<ClaudeAgent> {
+export function createMockAgent(projectId = 'test-project'): jest.Mocked<Agent> {
   const emitter = new EventEmitter();
   let status: AgentStatus = 'stopped';
   let mode: AgentMode = 'interactive';
@@ -666,7 +674,7 @@ export function createMockClaudeAgent(projectId = 'test-project'): jest.Mocked<C
   const queuedMessages: string[] = [];
   let sessionId = 'mock-session-' + Math.random().toString(36).substring(7);
 
-  const agent: jest.Mocked<ClaudeAgent> = {
+  const agent: jest.Mocked<Agent> = {
     projectId,
     get status() { return status; },
     get mode() { return mode; },
@@ -740,7 +748,7 @@ export function createMockClaudeAgent(projectId = 'test-project'): jest.Mocked<C
 // ============================================================================
 
 export function createMockAgentFactory(
-  mockAgent?: jest.Mocked<ClaudeAgent>
+  mockAgent?: jest.Mocked<Agent>
 ): jest.Mocked<AgentFactory> {
   return {
     create: jest.fn().mockImplementation((options: AgentFactoryOptions) => {
@@ -750,7 +758,7 @@ export function createMockAgentFactory(
         return mockAgent;
       }
 
-      return createMockClaudeAgent(options.projectId);
+      return createMockAgent(options.projectId);
     }),
   };
 }

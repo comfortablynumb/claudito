@@ -1727,6 +1727,12 @@
           DockerModule.populateSettingsFields(settings);
         }
 
+        // Agent profiles
+        if (typeof AgentProfilesModule !== 'undefined') {
+          window._cachedSettings = settings;
+          AgentProfilesModule.loadProfiles(settings);
+        }
+
         openModal('modal-settings');
       })
       .fail(function(xhr) {
@@ -2363,6 +2369,11 @@
     // Model selector handler
     $('#project-model-select').on('change', function() {
       handleProjectModelChange($(this).val() || null);
+    });
+
+    // Profile selector handler
+    $('#project-profile-select').on('change', function() {
+      handleProjectProfileChange($(this).val() || null);
     });
 
     // Cancel button handler
@@ -3762,6 +3773,9 @@
 
     // Load project model configuration
     loadProjectModel(projectId);
+
+    // Load project agent profile
+    loadProjectAgentProfile(projectId);
   }
 
   function loadDockerStatus(projectId) {
@@ -3947,6 +3961,33 @@
       });
   }
 
+  function loadProjectAgentProfile(projectId) {
+    // Populate the profile selector with available profiles
+    api.getSettings()
+      .done(function(settings) {
+        var profiles = (settings && settings.agentProfiles) || [];
+        var $select = $('#project-profile-select');
+        $select.empty();
+
+        profiles.forEach(function(p) {
+          var label = p.name + (p.isDefault ? ' (default)' : '');
+          $select.append('<option value="' + p.id + '">' + label + '</option>');
+        });
+
+        // Now load the project's selected profile
+        api.getProjectAgentProfile(projectId)
+          .done(function(data) {
+            var profileId = data.agentProfileId || (data.effectiveProfile && data.effectiveProfile.id) || '';
+            $select.val(profileId);
+            state.currentProjectProfileId = data.agentProfileId;
+          })
+          .fail(function() {
+            // Default to first option
+            state.currentProjectProfileId = null;
+          });
+      });
+  }
+
   function updateModelSelectorTitle(modelData) {
     var title = 'Select Claude model for this project';
 
@@ -4006,6 +4047,28 @@
         // Revert the selector to the previous value or Opus if no override
         $('#project-model-select').val(state.currentProjectModel || 'claude-sonnet-4-6');
         showErrorToast(xhr, 'Failed to change model');
+      });
+  }
+
+  function handleProjectProfileChange(profileId) {
+    var projectId = state.selectedProjectId;
+
+    if (!projectId) return;
+
+    api.updateProjectAgentProfile(projectId, profileId)
+      .done(function(response) {
+        state.currentProjectProfileId = profileId;
+        var profileName = response.effectiveProfile ? response.effectiveProfile.name : 'Default';
+        showToast('Agent profile changed to ' + profileName, 'success');
+
+        var project = findProjectById(projectId);
+
+        if (project && project.status === 'running') {
+          showToast('Agent will use the new profile after restart', 'info');
+        }
+      })
+      .fail(function(xhr) {
+        showErrorToast(xhr, 'Failed to change agent profile');
       });
   }
 
@@ -6274,6 +6337,10 @@
         showToast: showToast,
         showErrorToast: showErrorToast,
       });
+    }
+
+    if (typeof AgentProfilesModule !== 'undefined') {
+      AgentProfilesModule.setupEventHandlers();
     }
 
     // Inventify folder browse button in settings

@@ -6,7 +6,7 @@ import {
   AgentFactoryOptions,
   ImageData,
 } from '../../../src/agents/agent-manager';
-import { ClaudeAgent, AgentMessage, AgentStatus, ProcessInfo, ContextUsage, AgentEvents } from '../../../src/agents/claude-agent';
+import { Agent, AgentMessage, AgentStatus, ProcessInfo, ContextUsage, AgentEvents } from '../../../src/agents/agent';
 import {
   createMockProjectRepository,
   createMockConversationRepository,
@@ -105,7 +105,7 @@ describe('AgentManager Lifecycle Tests', () => {
   let deps: AgentManagerDependencies;
 
   // Mock agent creation
-  class MockClaudeAgent extends EventEmitter implements ClaudeAgent {
+  class MockAgent extends EventEmitter implements Agent {
     readonly projectId: string;
     readonly projectPath: string;
     mode: 'autonomous' | 'interactive' = 'autonomous';
@@ -279,7 +279,7 @@ describe('AgentManager Lifecycle Tests', () => {
 
     // Mock agent factory
     mockAgentFactory = {
-      create: jest.fn().mockImplementation((options: AgentFactoryOptions) => new MockClaudeAgent(options)),
+      create: jest.fn().mockImplementation((options: AgentFactoryOptions) => new MockAgent(options)),
     };
 
     deps = {
@@ -527,7 +527,7 @@ describe('AgentManager Lifecycle Tests', () => {
 
       // Create agent that will fail with session error
       mockAgentFactory.create.mockImplementation((options) => {
-        const agent = new MockClaudeAgent(options);
+        const agent = new MockAgent(options);
         agent.simulateSessionError('Session already in use');
         return agent;
       });
@@ -803,7 +803,7 @@ describe('AgentManager Lifecycle Tests', () => {
     });
 
     it('should remove queued messages', async () => {
-      const mockAgent = new MockClaudeAgent({
+      const mockAgent = new MockAgent({
         projectId,
         projectPath: '/test/project',
         mode: 'interactive',
@@ -834,7 +834,7 @@ describe('AgentManager Lifecycle Tests', () => {
 
   describe('Event Handling', () => {
     const projectId = 'test-project';
-    let mockAgent: MockClaudeAgent;
+    let mockAgent: MockAgent;
 
     beforeEach(() => {
       const mockProject = createTestProject({
@@ -847,7 +847,7 @@ describe('AgentManager Lifecycle Tests', () => {
       addProjectToRepository(mockProject);
 
       mockAgentFactory.create.mockImplementation((options) => {
-        mockAgent = new MockClaudeAgent(options);
+        mockAgent = new MockAgent(options);
         return mockAgent;
       });
     });
@@ -967,7 +967,7 @@ describe('AgentManager Lifecycle Tests', () => {
       const sessionRecoveryListener = jest.fn();
       agentManager.on('sessionRecovery', sessionRecoveryListener);
 
-      const mockAgent = new MockClaudeAgent({
+      const mockAgent = new MockAgent({
         projectId,
         projectPath: '/test/project',
         mode: 'interactive',
@@ -1011,7 +1011,7 @@ describe('AgentManager Lifecycle Tests', () => {
     });
 
     it('should track process PIDs', async () => {
-      const mockAgent = new MockClaudeAgent({
+      const mockAgent = new MockAgent({
         projectId,
         projectPath: '/test/project',
         mode: 'autonomous',
@@ -1034,7 +1034,7 @@ describe('AgentManager Lifecycle Tests', () => {
     });
 
     it('should cleanup PIDs on agent stop', async () => {
-      const mockAgent = new MockClaudeAgent({
+      const mockAgent = new MockAgent({
         projectId,
         projectPath: '/test/project',
         mode: 'autonomous',
@@ -1244,7 +1244,7 @@ describe('AgentManager Lifecycle Tests', () => {
     });
 
     it('should return agent information', async () => {
-      const mockAgent = new MockClaudeAgent({
+      const mockAgent = new MockAgent({
         projectId,
         projectPath: '/test/project',
         mode: 'interactive',
@@ -1341,7 +1341,7 @@ describe('AgentManager Lifecycle Tests', () => {
 
     it('should send input to one-off agent', async () => {
       const oneOffId = await startOneOff();
-      const createdAgent = mockAgentFactory.create.mock.results[0]!.value as MockClaudeAgent;
+      const createdAgent = mockAgentFactory.create.mock.results[0]!.value as MockAgent;
       const sendInputSpy = jest.spyOn(createdAgent, 'sendInput');
 
       agentManager.sendOneOffInput(oneOffId, 'hello');
@@ -1371,7 +1371,7 @@ describe('AgentManager Lifecycle Tests', () => {
 
     it('should return context usage from one-off agent', async () => {
       const oneOffId = await startOneOff();
-      const createdAgent = mockAgentFactory.create.mock.results[0]!.value as MockClaudeAgent;
+      const createdAgent = mockAgentFactory.create.mock.results[0]!.value as MockAgent;
 
       createdAgent.simulateContextUsage(createTestContextUsage({ totalTokens: 5000 }));
 
@@ -1387,7 +1387,7 @@ describe('AgentManager Lifecycle Tests', () => {
 
     it('should emit oneOffWaiting event', async () => {
       const oneOffId = await startOneOff();
-      const createdAgent = mockAgentFactory.create.mock.results[0]!.value as MockClaudeAgent;
+      const createdAgent = mockAgentFactory.create.mock.results[0]!.value as MockAgent;
 
       const waitingHandler = jest.fn();
       agentManager.on('oneOffWaiting', waitingHandler);
@@ -1399,7 +1399,7 @@ describe('AgentManager Lifecycle Tests', () => {
 
     it('should track waiting state via isOneOffWaitingForInput', async () => {
       const oneOffId = await startOneOff();
-      const createdAgent = mockAgentFactory.create.mock.results[0]!.value as MockClaudeAgent;
+      const createdAgent = mockAgentFactory.create.mock.results[0]!.value as MockAgent;
 
       expect(agentManager.isOneOffWaitingForInput(oneOffId)).toBe(false);
 
@@ -1418,7 +1418,7 @@ describe('AgentManager Lifecycle Tests', () => {
 
     it('should clean up waiting versions on stopOneOffAgent', async () => {
       const oneOffId = await startOneOff();
-      const createdAgent = mockAgentFactory.create.mock.results[0]!.value as MockClaudeAgent;
+      const createdAgent = mockAgentFactory.create.mock.results[0]!.value as MockAgent;
 
       createdAgent.simulateWaiting(true, 1);
 

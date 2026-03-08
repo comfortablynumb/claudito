@@ -1,4 +1,4 @@
-import { DefaultClaudeAgent, ClaudeAgentConfig } from '../../../src/agents/claude-agent';
+import { ClaudeBinary, ClaudeBinaryConfig } from '../../../src/agents/claude-binary';
 import { createMockChildProcess, createMockProcessSpawner, MockChildProcess } from '../helpers/mock-factories';
 import * as fs from 'fs';
 
@@ -11,11 +11,11 @@ function getSpawnArgs(spawner: ReturnType<typeof createMockProcessSpawner>): str
   return call ? call[1] : [];
 }
 
-describe('DefaultClaudeAgent', () => {
+describe('ClaudeBinary', () => {
   let mockProcess: MockChildProcess;
   let mockSpawner: ReturnType<typeof createMockProcessSpawner>;
-  let agent: DefaultClaudeAgent;
-  const defaultConfig: ClaudeAgentConfig = {
+  let agent: ClaudeBinary;
+  const defaultConfig: ClaudeBinaryConfig = {
     projectId: 'test-project',
     projectPath: '/test/path',
     mode: 'interactive',
@@ -36,12 +36,12 @@ describe('DefaultClaudeAgent', () => {
     // Simply reset the agent reference - we don't need to actually stop
     // since we're using mocked processes. Calling stop() would hang
     // because the mock process doesn't auto-exit.
-    agent = undefined as unknown as DefaultClaudeAgent;
+    agent = undefined as unknown as ClaudeBinary;
   });
 
   describe('constructor', () => {
     it('should initialize with default values when minimal config provided', () => {
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         projectId: 'test',
         projectPath: '/test',
         processSpawner: mockSpawner,
@@ -55,7 +55,7 @@ describe('DefaultClaudeAgent', () => {
     });
 
     it('should use custom processSpawner when provided', () => {
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         ...defaultConfig,
         processSpawner: mockSpawner,
       });
@@ -65,7 +65,7 @@ describe('DefaultClaudeAgent', () => {
     });
 
     it('should set mode to interactive by default', () => {
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         projectId: 'test',
         projectPath: '/test',
         processSpawner: mockSpawner,
@@ -75,7 +75,7 @@ describe('DefaultClaudeAgent', () => {
     });
 
     it('should set mode to autonomous when specified', () => {
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         projectId: 'test',
         projectPath: '/test',
         mode: 'autonomous',
@@ -86,7 +86,7 @@ describe('DefaultClaudeAgent', () => {
     });
 
     it('should use permissions config over legacy skipPermissions', () => {
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         projectId: 'test',
         projectPath: '/test',
         skipPermissions: true,
@@ -107,7 +107,7 @@ describe('DefaultClaudeAgent', () => {
         allowedTools: ['Read', 'Write'],
       };
 
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         projectId: 'test',
         projectPath: '/test',
         permissions: permissionsWithoutSkip,
@@ -122,7 +122,7 @@ describe('DefaultClaudeAgent', () => {
     });
 
     it('should default skipPermissions to false when no permissions object is provided', () => {
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         projectId: 'test',
         projectPath: '/test',
         processSpawner: mockSpawner,
@@ -134,7 +134,7 @@ describe('DefaultClaudeAgent', () => {
     });
 
     it('should respect explicit skipPermissions false value in permissions', () => {
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         projectId: 'test',
         projectPath: '/test',
         permissions: {
@@ -148,7 +148,7 @@ describe('DefaultClaudeAgent', () => {
     });
 
     it('should respect explicit skipPermissions true value in permissions', () => {
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         projectId: 'test',
         projectPath: '/test',
         permissions: {
@@ -164,7 +164,7 @@ describe('DefaultClaudeAgent', () => {
 
   describe('start', () => {
     beforeEach(() => {
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         ...defaultConfig,
         processSpawner: mockSpawner,
       });
@@ -200,7 +200,7 @@ describe('DefaultClaudeAgent', () => {
     });
 
     it('should add --permission-mode when permissionMode is set', () => {
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         ...defaultConfig,
         permissions: { skipPermissions: false, permissionMode: 'plan' },
         processSpawner: mockSpawner,
@@ -214,7 +214,7 @@ describe('DefaultClaudeAgent', () => {
     });
 
     it('should add --dangerously-skip-permissions when skipPermissions is true', () => {
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         ...defaultConfig,
         permissions: { skipPermissions: true },
         processSpawner: mockSpawner,
@@ -227,7 +227,7 @@ describe('DefaultClaudeAgent', () => {
     });
 
     it('should add --allowedTools when allowedTools provided', () => {
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         ...defaultConfig,
         permissions: { skipPermissions: false, allowedTools: ['Read', 'Write'] },
         processSpawner: mockSpawner,
@@ -241,7 +241,7 @@ describe('DefaultClaudeAgent', () => {
     });
 
     it('should add --disallowedTools when disallowedTools provided', () => {
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         ...defaultConfig,
         permissions: { skipPermissions: false, disallowedTools: ['Bash'] },
         processSpawner: mockSpawner,
@@ -258,7 +258,7 @@ describe('DefaultClaudeAgent', () => {
     });
 
     it('should add --append-system-prompt when appendSystemPrompt provided', () => {
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         ...defaultConfig,
         permissions: { skipPermissions: false, appendSystemPrompt: 'Custom prompt' },
         processSpawner: mockSpawner,
@@ -272,7 +272,7 @@ describe('DefaultClaudeAgent', () => {
     });
 
     it('should add --session-id for new sessions', () => {
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         ...defaultConfig,
         sessionId: 'test-session-123',
         isNewSession: true,
@@ -287,7 +287,7 @@ describe('DefaultClaudeAgent', () => {
     });
 
     it('should add --resume for existing sessions', () => {
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         ...defaultConfig,
         sessionId: 'test-session-123',
         isNewSession: false,
@@ -307,7 +307,7 @@ describe('DefaultClaudeAgent', () => {
       mockFs.mkdirSync.mockImplementation(() => undefined);
       mockFs.writeFileSync.mockImplementation(() => {});
 
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         ...defaultConfig,
         mcpServers: [
           {
@@ -349,7 +349,7 @@ describe('DefaultClaudeAgent', () => {
       mockFs.mkdirSync.mockImplementation(() => undefined);
       mockFs.writeFileSync.mockImplementation(() => {});
 
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         ...defaultConfig,
         mcpServers: [
           {
@@ -385,7 +385,7 @@ describe('DefaultClaudeAgent', () => {
       mockFs.mkdirSync.mockImplementation(() => undefined);
       mockFs.writeFileSync.mockImplementation(() => {});
 
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         ...defaultConfig,
         mcpServers: [
           {
@@ -418,7 +418,7 @@ describe('DefaultClaudeAgent', () => {
       mockFs.mkdirSync.mockImplementation(() => undefined);
       mockFs.writeFileSync.mockImplementation(() => {});
 
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         ...defaultConfig,
         mcpServers: [
           {
@@ -463,7 +463,7 @@ describe('DefaultClaudeAgent', () => {
         configFilePath = path as string;
       });
 
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         ...defaultConfig,
         mcpServers: [
           {
@@ -501,7 +501,7 @@ describe('DefaultClaudeAgent', () => {
     });
 
     it('should close stdin in autonomous mode after writing', () => {
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         ...defaultConfig,
         mode: 'autonomous',
         processSpawner: mockSpawner,
@@ -535,7 +535,7 @@ describe('DefaultClaudeAgent', () => {
 
   describe('stop', () => {
     beforeEach(() => {
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         ...defaultConfig,
         processSpawner: mockSpawner,
       });
@@ -570,7 +570,7 @@ describe('DefaultClaudeAgent', () => {
 
   describe('sendInput', () => {
     beforeEach(() => {
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         ...defaultConfig,
         processSpawner: mockSpawner,
       });
@@ -627,7 +627,7 @@ describe('DefaultClaudeAgent', () => {
 
   describe('removeQueuedMessage', () => {
     beforeEach(() => {
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         ...defaultConfig,
         processSpawner: mockSpawner,
       });
@@ -642,7 +642,7 @@ describe('DefaultClaudeAgent', () => {
 
   describe('Stream Event Handling', () => {
     beforeEach(() => {
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         ...defaultConfig,
         processSpawner: mockSpawner,
       });
@@ -1108,7 +1108,7 @@ describe('DefaultClaudeAgent', () => {
 
   describe('Properties', () => {
     beforeEach(() => {
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         ...defaultConfig,
         processSpawner: mockSpawner,
       });
@@ -1125,7 +1125,7 @@ describe('DefaultClaudeAgent', () => {
     });
 
     it('isWaitingForInput should return false in autonomous mode', () => {
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         ...defaultConfig,
         mode: 'autonomous',
         processSpawner: mockSpawner,
@@ -1141,7 +1141,7 @@ describe('DefaultClaudeAgent', () => {
     it('waitingVersion should increment when waiting status changes', () => {
       // For this specific test, let's just verify the behavior is correct
       // The stream handler integration has been tested elsewhere
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         ...defaultConfig,
         processSpawner: mockSpawner,
       });
@@ -1163,7 +1163,7 @@ describe('DefaultClaudeAgent', () => {
     });
 
     it('permissionMode should return from permissions config', () => {
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         ...defaultConfig,
         permissions: { skipPermissions: false, permissionMode: 'plan' },
         processSpawner: mockSpawner,
@@ -1175,7 +1175,7 @@ describe('DefaultClaudeAgent', () => {
 
   describe('Exit Handling', () => {
     beforeEach(() => {
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         ...defaultConfig,
         processSpawner: mockSpawner,
       });
@@ -1245,7 +1245,7 @@ describe('DefaultClaudeAgent', () => {
 
   describe('Error Handling', () => {
     beforeEach(() => {
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         ...defaultConfig,
         processSpawner: mockSpawner,
       });
@@ -1294,7 +1294,7 @@ describe('DefaultClaudeAgent', () => {
 
   describe('Tool Content Formatting', () => {
     beforeEach(() => {
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         ...defaultConfig,
         processSpawner: mockSpawner,
       });
@@ -1487,7 +1487,7 @@ describe('DefaultClaudeAgent', () => {
 
   describe('sendToolResult idempotency', () => {
     beforeEach(() => {
-      agent = new DefaultClaudeAgent({
+      agent = new ClaudeBinary({
         ...defaultConfig,
         processSpawner: mockSpawner,
       });

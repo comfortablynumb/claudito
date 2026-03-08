@@ -40,6 +40,32 @@ describe('ImageAttachmentModule', () => {
 
     global.$ = createMockJQuery();
 
+    // Mock Image constructor for compressImage
+    global.Image = jest.fn(function() {
+      const img = this;
+      img.width = 100;
+      img.height = 100;
+      Object.defineProperty(img, 'src', {
+        set() {
+          // Trigger onload synchronously for tests
+          if (img.onload) img.onload();
+        }
+      });
+    });
+
+    // Mock canvas for compressImage
+    const mockCtx = { drawImage: jest.fn() };
+    const mockCanvas = {
+      width: 0,
+      height: 0,
+      getContext: jest.fn().mockReturnValue(mockCtx),
+      toDataURL: jest.fn().mockReturnValue('data:image/jpeg;base64,Y29tcHJlc3NlZA==')
+    };
+    document.createElement = jest.fn((tag) => {
+      if (tag === 'canvas') return mockCanvas;
+      return {};
+    });
+
     ImageAttachmentModule.init({
       state: mockState,
       showToast: mockShowToast,
@@ -82,7 +108,8 @@ describe('ImageAttachmentModule', () => {
       expect(mockEvent.preventDefault).toHaveBeenCalled();
       expect(mockFileReader.readAsDataURL).toHaveBeenCalledWith(mockFile);
       expect(mockState.pendingImages).toHaveLength(1);
-      expect(mockState.pendingImages[0].mimeType).toBe('image/png');
+      // After compression, mimeType is always image/jpeg
+      expect(mockState.pendingImages[0].mimeType).toBe('image/jpeg');
     });
 
     it('should ignore non-image clipboard items', () => {
@@ -117,19 +144,19 @@ describe('ImageAttachmentModule', () => {
   });
 
   describe('processFile', () => {
-    it('should reject files larger than 5MB', () => {
+    it('should reject files larger than 10MB', () => {
       const largeFile = {
-        size: 6 * 1024 * 1024, // 6MB
+        size: 11 * 1024 * 1024, // 11MB
         type: 'image/png'
       };
 
       ImageAttachmentModule.processFile(largeFile);
 
-      expect(mockShowToast).toHaveBeenCalledWith('Image too large (max 5MB)', 'error');
+      expect(mockShowToast).toHaveBeenCalledWith('Image too large (max 10MB)', 'error');
       expect(mockState.pendingImages).toHaveLength(0);
     });
 
-    it('should add valid images to pending', () => {
+    it('should add valid images to pending after compression', () => {
       const validFile = {
         size: 100 * 1024, // 100KB
         type: 'image/jpeg'
@@ -148,8 +175,10 @@ describe('ImageAttachmentModule', () => {
       ImageAttachmentModule.processFile(validFile);
 
       expect(mockState.pendingImages).toHaveLength(1);
+      // After compression, mimeType is always image/jpeg
       expect(mockState.pendingImages[0].mimeType).toBe('image/jpeg');
-      expect(mockState.pendingImages[0].size).toBe(100 * 1024);
+      // originalSize tracks the original file size
+      expect(mockState.pendingImages[0].originalSize).toBe(100 * 1024);
     });
 
     it('should handle read errors', () => {

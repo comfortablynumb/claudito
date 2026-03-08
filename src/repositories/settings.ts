@@ -221,6 +221,36 @@ Remember to follow all best practices and produce production-ready code.`,
   },
 ];
 
+export interface AnthropicProfileConfig {
+  runtime: 'claude-binary' | 'sdk';
+  /** Only when runtime=sdk */
+  authMode?: 'api-key' | 'pro-plan';
+  /** Only when authMode=api-key */
+  apiKey?: string;
+}
+
+export interface OpencodeProfileConfig {
+  /** Optional path to opencode config file */
+  configPath?: string;
+}
+
+export interface AgentProfile {
+  id: string;
+  name: string;
+  provider: 'anthropic' | 'opencode';
+  isDefault: boolean;
+  anthropicConfig?: AnthropicProfileConfig;
+  opencodeConfig?: OpencodeProfileConfig;
+}
+
+export const DEFAULT_AGENT_PROFILE: AgentProfile = {
+  id: 'default',
+  name: 'Claude Binary',
+  provider: 'anthropic',
+  isDefault: true,
+  anthropicConfig: { runtime: 'claude-binary' },
+};
+
 export interface McpServerConfig {
   id: string;                    // Unique identifier
   name: string;                  // Display name
@@ -284,6 +314,8 @@ export interface GlobalSettings {
   inventifyFolder: string;
   /** Docker sandboxed execution settings */
   docker: DockerSettings;
+  /** Agent execution profiles (provider + runtime config) */
+  agentProfiles: AgentProfile[];
 }
 
 const DEFAULT_SETTINGS: GlobalSettings = {
@@ -397,6 +429,7 @@ Your goal is to ensure high-quality deliverables. Be thorough but fair in your a
     resourceLimits: { cpus: 2.0, memoryMb: 4096 },
     networkMode: 'bridge',
   },
+  agentProfiles: [{ ...DEFAULT_AGENT_PROFILE }],
 };
 
 // Update type that allows partial nested objects for incremental updates
@@ -418,6 +451,7 @@ export interface SettingsUpdate {
   chromeEnabled?: boolean;
   inventifyFolder?: string;
   docker?: Partial<DockerSettings>;
+  agentProfiles?: AgentProfile[];
 }
 
 export interface SettingsRepository {
@@ -508,6 +542,21 @@ export class FileSettingsRepository implements SettingsRepository {
     return merged;
   }
 
+  private mergeProfiles(existingProfiles: AgentProfile[] | undefined): AgentProfile[] {
+    if (!Array.isArray(existingProfiles) || existingProfiles.length === 0) {
+      return [{ ...DEFAULT_AGENT_PROFILE }];
+    }
+
+    // Ensure exactly one default
+    const hasDefault = existingProfiles.some(p => p.isDefault);
+
+    if (!hasDefault) {
+      existingProfiles[0]!.isDefault = true;
+    }
+
+    return existingProfiles;
+  }
+
   private mergeWithDefaults(parsed: Partial<GlobalSettings>): GlobalSettings {
     const parsedPerms = parsed.claudePermissions;
     const parsedLimits = parsed.agentLimits;
@@ -571,6 +620,7 @@ export class FileSettingsRepository implements SettingsRepository {
         },
         networkMode: parsedDocker?.networkMode ?? DEFAULT_SETTINGS.docker.networkMode,
       },
+      agentProfiles: this.mergeProfiles(parsed.agentProfiles),
     };
   }
 
@@ -681,6 +731,10 @@ export class FileSettingsRepository implements SettingsRepository {
 
     if (updates.inventifyFolder !== undefined) {
       this.settings.inventifyFolder = updates.inventifyFolder;
+    }
+
+    if (updates.agentProfiles !== undefined) {
+      this.settings.agentProfiles = updates.agentProfiles;
     }
 
     if (updates.docker) {

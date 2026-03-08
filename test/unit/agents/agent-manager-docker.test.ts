@@ -2,10 +2,10 @@ import {
   DefaultAgentManager,
   AgentManagerDependencies,
 } from '../../../src/agents/agent-manager';
-import { ClaudeAgent } from '../../../src/agents/claude-agent';
+import { Agent } from '../../../src/agents/agent';
 import {
   createMockAgentFactory,
-  createMockClaudeAgent,
+  createMockAgent,
   createMockProjectRepository,
   createMockConversationRepository,
   createMockInstructionGenerator,
@@ -35,7 +35,7 @@ jest.mock('../../../src/utils', () => {
 
 describe('DefaultAgentManager - Docker Integration', () => {
   let agentManager: DefaultAgentManager;
-  let mockAgent: jest.Mocked<ClaudeAgent>;
+  let mockAgent: jest.Mocked<Agent>;
   let mockAgentFactory: ReturnType<typeof createMockAgentFactory>;
   let mockProjectRepo: ReturnType<typeof createMockProjectRepository>;
   let mockConversationRepo: ReturnType<typeof createMockConversationRepository>;
@@ -61,7 +61,7 @@ describe('DefaultAgentManager - Docker Integration', () => {
   }
 
   beforeEach(() => {
-    mockAgent = createMockClaudeAgent('test-project');
+    mockAgent = createMockAgent('test-project');
     mockAgentFactory = createMockAgentFactory(mockAgent);
     mockProjectRepo = createMockProjectRepository([testProject]);
     mockConversationRepo = createMockConversationRepository();
