@@ -6,8 +6,12 @@ import {
 import { AgentManager, AgentMessage } from '../../../src/agents';
 import { RoadmapGenerator, AuthService, ShellService } from '../../../src/services';
 import { RalphLoopService } from '../../../src/services/ralph-loop/types';
+import { RunProcessManager } from '../../../src/services/run-config/run-process-types';
+import { ConversationRepository } from '../../../src/repositories/conversation';
+import { ProjectRepository } from '../../../src/repositories/project';
 import { Server } from 'http';
 import { EventEmitter } from 'events';
+import { getLogStore } from '../../../src/utils/logger';
 
 // Mock WebSocket and WebSocketServer
 jest.mock('ws', () => {
@@ -101,6 +105,7 @@ describe('DefaultWebSocketServer', () => {
       cleanupOrphanProcesses: jest.fn().mockResolvedValue({ killed: [], failed: [] }),
       restartAllRunningAgents: jest.fn(),
       getRunningProjectIds: jest.fn().mockReturnValue([]),
+      getOneOffMeta: jest.fn().mockReturnValue(null),
     } as unknown as jest.Mocked<AgentManager>;
   };
 
@@ -679,6 +684,44 @@ describe('DefaultWebSocketServer', () => {
       }
     });
   });
+
+  const createMockRunProcessManager = (): RunProcessManager & EventEmitter => {
+    const emitter = new EventEmitter();
+    return {
+      on: emitter.on.bind(emitter),
+      off: emitter.off.bind(emitter),
+      emit: emitter.emit.bind(emitter),
+      listenerCount: emitter.listenerCount.bind(emitter),
+      start: jest.fn(),
+      stop: jest.fn(),
+      stopAll: jest.fn(),
+      getStatus: jest.fn(),
+      getAllStatuses: jest.fn().mockReturnValue([]),
+      shutdown: jest.fn().mockResolvedValue(undefined),
+    } as unknown as RunProcessManager & EventEmitter;
+  };
+
+  const createMockConversationRepository = (): jest.Mocked<ConversationRepository> => {
+    return {
+      findById: jest.fn(),
+      findAll: jest.fn(),
+      create: jest.fn(),
+      addMessage: jest.fn().mockResolvedValue(undefined),
+      rename: jest.fn(),
+      delete: jest.fn(),
+      getMetadata: jest.fn(),
+    } as unknown as jest.Mocked<ConversationRepository>;
+  };
+
+  const createMockProjectRepository = (): jest.Mocked<ProjectRepository> => {
+    return {
+      findById: jest.fn().mockResolvedValue(null),
+      findAll: jest.fn().mockResolvedValue([]),
+      create: jest.fn(),
+      update: jest.fn(),
+      delete: jest.fn(),
+    } as unknown as jest.Mocked<ProjectRepository>;
+  };
 
   describe('Ralph Loop listeners', () => {
     it('should set up Ralph Loop listeners when service is provided', () => {
@@ -1327,6 +1370,1147 @@ describe('DefaultWebSocketServer', () => {
 
         expect(mockWs.send).toHaveBeenCalledTimes(2);
       });
+    });
+  });
+
+  describe('verifyClient', () => {
+    it('should allow connection when no auth service is configured', () => {
+      wsServer = new DefaultWebSocketServer({ agentManager: mockAgentManager });
+      wsServer.initialize({} as Server);
+
+      const { WebSocketServer: MockWebSocketServer } = jest.requireMock('ws');
+      const mockWssInstance = MockWebSocketServer.mock.results[0].value;
+      const verifyClientFn = MockWebSocketServer.mock.calls[0][0].verifyClient;
+
+      const callback = jest.fn();
+      verifyClientFn({ req: { headers: {} } }, callback);
+
+      expect(callback).toHaveBeenCalledWith(true);
+    });
+
+    it('should reject connection when session cookie is missing', () => {
+      wsServer = new DefaultWebSocketServer({
+        agentManager: mockAgentManager,
+        authService: mockAuthService,
+      });
+      wsServer.initialize({} as Server);
+
+      const { WebSocketServer: MockWebSocketServer } = jest.requireMock('ws');
+      const verifyClientFn = MockWebSocketServer.mock.calls[0][0].verifyClient;
+
+      const callback = jest.fn();
+      verifyClientFn({ req: { headers: {} } }, callback);
+
+      expect(callback).toHaveBeenCalledWith(false, 401, 'Unauthorized');
+    });
+
+    it('should reject connection when session is invalid', () => {
+      mockAuthService.validateSession.mockReturnValue(false);
+      wsServer = new DefaultWebSocketServer({
+        agentManager: mockAgentManager,
+        authService: mockAuthService,
+      });
+      wsServer.initialize({} as Server);
+
+      const { WebSocketServer: MockWebSocketServer } = jest.requireMock('ws');
+      const verifyClientFn = MockWebSocketServer.mock.calls[0][0].verifyClient;
+
+      const callback = jest.fn();
+      verifyClientFn(
+        { req: { headers: { cookie: 'claudito_session=bad-session-id' } } },
+        callback
+      );
+
+      expect(callback).toHaveBeenCalledWith(false, 401, 'Unauthorized');
+    });
+
+    it('should allow connection when session is valid', () => {
+      mockAuthService.validateSession.mockReturnValue(true);
+      wsServer = new DefaultWebSocketServer({
+        agentManager: mockAgentManager,
+        authService: mockAuthService,
+      });
+      wsServer.initialize({} as Server);
+
+      const { WebSocketServer: MockWebSocketServer } = jest.requireMock('ws');
+      const verifyClientFn = MockWebSocketServer.mock.calls[0][0].verifyClient;
+
+      const callback = jest.fn();
+      verifyClientFn(
+        { req: { headers: { cookie: 'claudito_session=valid-session-id' } } },
+        callback
+      );
+
+      expect(callback).toHaveBeenCalledWith(true);
+    });
+  });
+
+  describe('broadcastToProject with OPEN subscribers', () => {
+    it('should send message to OPEN subscribers', () => {
+      wsServer = new DefaultWebSocketServer({ agentManager: mockAgentManager });
+      const mockHttpServer = new EventEmitter() as Server;
+      wsServer.initialize(mockHttpServer);
+
+      const { WebSocketServer: MockWebSocketServer } = jest.requireMock('ws');
+      const mockWssInstance = MockWebSocketServer.mock.results[0].value;
+      const connectionHandler = mockWssInstance.on.mock.calls.find(
+        ([event]: [string]) => event === 'connection'
+      )[1];
+
+      const openWs = {
+        readyState: 1,
+        send: jest.fn(),
+        on: jest.fn(),
+        close: jest.fn(),
+      };
+
+      const handleMessage = jest.fn();
+      openWs.on.mockImplementation((event: string, handler: (...args: unknown[]) => void) => {
+        if (event === 'message') {
+          handleMessage.mockImplementation(handler);
+        }
+      });
+
+      connectionHandler(openWs);
+      handleMessage(JSON.stringify({ type: 'subscribe', projectId: 'test-project' }));
+
+      wsServer.broadcastToProject('test-project', {
+        type: 'agent_message',
+        projectId: 'test-project',
+        data: { type: 'stdout', content: 'test', timestamp: new Date().toISOString() },
+      });
+
+      expect(openWs.send).toHaveBeenCalledWith(
+        expect.stringContaining('"type":"agent_message"')
+      );
+    });
+  });
+
+  describe('unsubscribeFromProject', () => {
+    it('should remove ws from existing subscribers', () => {
+      wsServer = new DefaultWebSocketServer({ agentManager: mockAgentManager });
+      const mockHttpServer = new EventEmitter() as Server;
+      wsServer.initialize(mockHttpServer);
+
+      const { WebSocketServer: MockWebSocketServer } = jest.requireMock('ws');
+      const mockWssInstance = MockWebSocketServer.mock.results[0].value;
+      const connectionHandler = mockWssInstance.on.mock.calls.find(
+        ([event]: [string]) => event === 'connection'
+      )[1];
+
+      const openWs = {
+        readyState: 1,
+        send: jest.fn(),
+        on: jest.fn(),
+        close: jest.fn(),
+      };
+
+      const handleMessage = jest.fn();
+      openWs.on.mockImplementation((event: string, handler: (...args: unknown[]) => void) => {
+        if (event === 'message') {
+          handleMessage.mockImplementation(handler);
+        }
+      });
+
+      connectionHandler(openWs);
+      handleMessage(JSON.stringify({ type: 'subscribe', projectId: 'test-project' }));
+      handleMessage(JSON.stringify({ type: 'unsubscribe', projectId: 'test-project' }));
+
+      openWs.send.mockClear();
+      wsServer.broadcastToProject('test-project', { type: 'connected', data: 'x' });
+
+      // After unsubscribe, the message to test-project should not call send again
+      // (the ws may have been removed from subscribers)
+      expect(openWs.send).not.toHaveBeenCalledWith(
+        expect.stringContaining('"type":"connected"')
+      );
+    });
+  });
+
+  describe('handleDisconnect with subscriptions', () => {
+    it('should remove ws from project subscriptions on disconnect', () => {
+      wsServer = new DefaultWebSocketServer({ agentManager: mockAgentManager });
+      const mockHttpServer = new EventEmitter() as Server;
+      wsServer.initialize(mockHttpServer);
+
+      const { WebSocketServer: MockWebSocketServer } = jest.requireMock('ws');
+      const mockWssInstance = MockWebSocketServer.mock.results[0].value;
+      const connectionHandler = mockWssInstance.on.mock.calls.find(
+        ([event]: [string]) => event === 'connection'
+      )[1];
+
+      const openWs = {
+        readyState: 1,
+        send: jest.fn(),
+        on: jest.fn(),
+        close: jest.fn(),
+      };
+
+      const handleMessage = jest.fn();
+      const handleClose = jest.fn();
+      openWs.on.mockImplementation((event: string, handler: (...args: unknown[]) => void) => {
+        if (event === 'message') {
+          handleMessage.mockImplementation(handler);
+        } else if (event === 'close') {
+          handleClose.mockImplementation(handler);
+        }
+      });
+
+      connectionHandler(openWs);
+      handleMessage(JSON.stringify({ type: 'register', clientId: 'sub-client' }));
+      handleMessage(JSON.stringify({ type: 'subscribe', projectId: 'sub-project' }));
+
+      // Verify subscription exists
+      openWs.send.mockClear();
+      wsServer.broadcastToProject('sub-project', { type: 'connected', data: 'x' });
+      expect(openWs.send).toHaveBeenCalled();
+
+      // Disconnect
+      openWs.send.mockClear();
+      handleClose();
+
+      // Now broadcast should not reach the disconnected client
+      wsServer.broadcastToProject('sub-project', { type: 'connected', data: 'x' });
+      expect(openWs.send).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('broadcastToProject with non-OPEN clients', () => {
+    it('should skip clients that are not in OPEN state', () => {
+      wsServer = new DefaultWebSocketServer({ agentManager: mockAgentManager });
+
+      const mockHttpServer = new EventEmitter() as Server;
+      wsServer.initialize(mockHttpServer);
+
+      const { WebSocketServer: MockWebSocketServer } = jest.requireMock('ws');
+      const mockWssInstance = MockWebSocketServer.mock.results[0].value;
+      const connectionHandler = mockWssInstance.on.mock.calls.find(
+        ([event]: [string]) => event === 'connection'
+      )[1];
+
+      const closedWs = {
+        readyState: 3, // CLOSED
+        send: jest.fn(),
+        on: jest.fn(),
+        close: jest.fn(),
+      };
+
+      const handleMessage = jest.fn();
+      closedWs.on.mockImplementation((event: string, handler: (...args: unknown[]) => void) => {
+        if (event === 'message') {
+          handleMessage.mockImplementation(handler);
+        }
+      });
+
+      connectionHandler(closedWs);
+      handleMessage(JSON.stringify({ type: 'subscribe', projectId: 'test-project' }));
+
+      wsServer.broadcastToProject('test-project', {
+        type: 'agent_message',
+        projectId: 'test-project',
+        data: { type: 'stdout', content: 'test', timestamp: new Date().toISOString() },
+      });
+
+      expect(closedWs.send).not.toHaveBeenCalledWith(
+        expect.stringContaining('"type":"agent_message"')
+      );
+    });
+  });
+
+  describe('processClientMessage edge cases', () => {
+    let mockWsInstance: any;
+    let handleMessage: jest.Mock;
+
+    beforeEach(() => {
+      wsServer = new DefaultWebSocketServer({ agentManager: mockAgentManager });
+      const mockHttpServer = new EventEmitter() as Server;
+      wsServer.initialize(mockHttpServer);
+
+      const { WebSocketServer: MockWebSocketServer } = jest.requireMock('ws');
+      const mockWssInstance = MockWebSocketServer.mock.results[0].value;
+      const connectionHandler = mockWssInstance.on.mock.calls.find(
+        ([event]: [string]) => event === 'connection'
+      )[1];
+
+      mockWsInstance = {
+        readyState: 1,
+        send: jest.fn(),
+        on: jest.fn(),
+        close: jest.fn(),
+      };
+
+      handleMessage = jest.fn();
+      mockWsInstance.on.mockImplementation((event: string, handler: (...args: unknown[]) => void) => {
+        if (event === 'message') {
+          handleMessage.mockImplementation(handler);
+        }
+      });
+
+      connectionHandler(mockWsInstance);
+    });
+
+    it('should ignore register message with no clientId', () => {
+      handleMessage(JSON.stringify({ type: 'register' }));
+      expect(wsServer.getConnectedClients()).toHaveLength(0);
+    });
+
+    it('should ignore subscribe message with no projectId', () => {
+      handleMessage(JSON.stringify({ type: 'subscribe' }));
+      expect(() => wsServer.broadcastToProject('any-project', { type: 'connected', data: 'x' })).not.toThrow();
+    });
+
+    it('should ignore unsubscribe message with no projectId', () => {
+      expect(() => handleMessage(JSON.stringify({ type: 'unsubscribe' }))).not.toThrow();
+    });
+
+    it('should handle resource_event with undefined data', () => {
+      expect(() => handleMessage(JSON.stringify({ type: 'resource_event' }))).not.toThrow();
+    });
+
+    it('should ignore invalid JSON messages', () => {
+      expect(() => handleMessage('not valid json {')).not.toThrow();
+    });
+
+    it('should handle unsubscribe from project with no subscribers', () => {
+      handleMessage(JSON.stringify({ type: 'unsubscribe', projectId: 'nonexistent-project' }));
+      expect(wsServer.getConnectedClients()).toHaveLength(0);
+    });
+
+    it('should handle disconnect of unregistered ws connection', () => {
+      const handleClose = jest.fn();
+      const anotherWs = {
+        readyState: 1,
+        send: jest.fn(),
+        on: jest.fn(),
+        close: jest.fn(),
+      };
+
+      const { WebSocketServer: MockWebSocketServer } = jest.requireMock('ws');
+      const mockWssInstance = MockWebSocketServer.mock.results[0].value;
+      const connectionHandler = mockWssInstance.on.mock.calls.find(
+        ([event]: [string]) => event === 'connection'
+      )[1];
+
+      anotherWs.on.mockImplementation((event: string, handler: (...args: unknown[]) => void) => {
+        if (event === 'close') {
+          handleClose.mockImplementation(handler);
+        }
+      });
+
+      connectionHandler(anotherWs);
+
+      // Close without registering - should not throw
+      expect(() => handleClose()).not.toThrow();
+    });
+  });
+
+  describe('dockerFallbackWarning event', () => {
+    it('should broadcast docker_fallback_warning on event', () => {
+      wsServer = new DefaultWebSocketServer({ agentManager: mockAgentManager });
+
+      const dockerWarningListener = agentListeners.get('dockerFallbackWarning')?.values().next().value as
+        | ((...args: unknown[]) => void)
+        | undefined;
+
+      expect(dockerWarningListener).toBeDefined();
+
+      expect(() => {
+        dockerWarningListener!('test-project', 'Container not available');
+      }).not.toThrow();
+    });
+  });
+
+  describe('Ralph Loop output and tool_use events', () => {
+    let mockRalphLoop: RalphLoopService & EventEmitter;
+
+    beforeEach(() => {
+      mockRalphLoop = createMockRalphLoopService();
+      wsServer = new DefaultWebSocketServer({
+        agentManager: mockAgentManager,
+        ralphLoopService: mockRalphLoop,
+      });
+    });
+
+    it('should handle output event', () => {
+      expect(() => {
+        mockRalphLoop.emit('output', 'project-1', 'task-123', 'worker', 'Some output content');
+      }).not.toThrow();
+    });
+
+    it('should handle tool_use event', () => {
+      const toolInfo = {
+        tool_name: 'Bash',
+        tool_id: 'tool-abc',
+        parameters: { command: 'ls' },
+        timestamp: new Date().toISOString(),
+      };
+
+      expect(() => {
+        mockRalphLoop.emit('tool_use', 'project-1', 'task-123', 'worker', toolInfo);
+      }).not.toThrow();
+    });
+  });
+
+  describe('oneOff agent listeners', () => {
+    it('should ignore oneOffMessage when meta is null', () => {
+      mockAgentManager.getOneOffMeta.mockReturnValue(null);
+      wsServer = new DefaultWebSocketServer({ agentManager: mockAgentManager });
+
+      const listener = agentListeners.get('oneOffMessage')?.values().next().value as
+        | ((...args: unknown[]) => void)
+        | undefined;
+
+      expect(listener).toBeDefined();
+      expect(() => {
+        listener!('unknown-oneoff', {
+          type: 'stdout',
+          content: 'test',
+          timestamp: new Date().toISOString(),
+        });
+      }).not.toThrow();
+    });
+
+    it('should broadcast oneoff_message when meta is present', () => {
+      mockAgentManager.getOneOffMeta.mockReturnValue({
+        projectId: 'proj-1',
+        label: 'Test Label',
+      });
+      wsServer = new DefaultWebSocketServer({ agentManager: mockAgentManager });
+
+      const listener = agentListeners.get('oneOffMessage')?.values().next().value as
+        | ((...args: unknown[]) => void)
+        | undefined;
+
+      expect(() => {
+        listener!('oneoff-123', {
+          type: 'stdout',
+          content: 'hello',
+          timestamp: new Date().toISOString(),
+        });
+      }).not.toThrow();
+    });
+
+    it('should ignore oneOffStatus when meta is null', () => {
+      mockAgentManager.getOneOffMeta.mockReturnValue(null);
+      wsServer = new DefaultWebSocketServer({ agentManager: mockAgentManager });
+
+      const listener = agentListeners.get('oneOffStatus')?.values().next().value as
+        | ((...args: unknown[]) => void)
+        | undefined;
+
+      expect(listener).toBeDefined();
+      expect(() => {
+        listener!('unknown-oneoff', 'running');
+      }).not.toThrow();
+    });
+
+    it('should broadcast oneoff_status and agent_status when meta is present', () => {
+      mockAgentManager.getOneOffMeta.mockReturnValue({
+        projectId: 'proj-1',
+        label: 'Test Label',
+      });
+      wsServer = new DefaultWebSocketServer({ agentManager: mockAgentManager });
+
+      const listener = agentListeners.get('oneOffStatus')?.values().next().value as
+        | ((...args: unknown[]) => void)
+        | undefined;
+
+      expect(() => {
+        listener!('oneoff-123', 'stopped');
+      }).not.toThrow();
+
+      expect(mockAgentManager.getFullStatus).toHaveBeenCalledWith('proj-1');
+    });
+
+    it('should ignore oneOffWaiting when meta is null', () => {
+      mockAgentManager.getOneOffMeta.mockReturnValue(null);
+      wsServer = new DefaultWebSocketServer({ agentManager: mockAgentManager });
+
+      const listener = agentListeners.get('oneOffWaiting')?.values().next().value as
+        | ((...args: unknown[]) => void)
+        | undefined;
+
+      expect(listener).toBeDefined();
+      expect(() => {
+        listener!('unknown-oneoff', true, 1);
+      }).not.toThrow();
+    });
+
+    it('should broadcast oneoff_waiting when meta is present', () => {
+      mockAgentManager.getOneOffMeta.mockReturnValue({
+        projectId: 'proj-1',
+        label: 'Test Label',
+      });
+      wsServer = new DefaultWebSocketServer({ agentManager: mockAgentManager });
+
+      const listener = agentListeners.get('oneOffWaiting')?.values().next().value as
+        | ((...args: unknown[]) => void)
+        | undefined;
+
+      expect(() => {
+        listener!('oneoff-123', true, 2);
+      }).not.toThrow();
+    });
+  });
+
+  describe('run config process listeners', () => {
+    let mockRunProcessManager: RunProcessManager & EventEmitter;
+
+    beforeEach(() => {
+      mockRunProcessManager = createMockRunProcessManager();
+    });
+
+    it('should set up run config listeners when manager is provided', () => {
+      wsServer = new DefaultWebSocketServer({
+        agentManager: mockAgentManager,
+        runProcessManager: mockRunProcessManager,
+      });
+
+      expect((mockRunProcessManager as EventEmitter).listenerCount('output')).toBe(1);
+      expect((mockRunProcessManager as EventEmitter).listenerCount('status')).toBe(1);
+    });
+
+    it('should not set up listeners when manager is not provided', () => {
+      wsServer = new DefaultWebSocketServer({ agentManager: mockAgentManager });
+      expect(wsServer).toBeDefined();
+    });
+
+    it('should broadcast run_config_output on output event', () => {
+      wsServer = new DefaultWebSocketServer({
+        agentManager: mockAgentManager,
+        runProcessManager: mockRunProcessManager,
+      });
+
+      expect(() => {
+        (mockRunProcessManager as EventEmitter).emit('output', 'project-1', 'config-abc', 'output data');
+      }).not.toThrow();
+    });
+
+    it('should broadcast run_config_status on status event', () => {
+      wsServer = new DefaultWebSocketServer({
+        agentManager: mockAgentManager,
+        runProcessManager: mockRunProcessManager,
+      });
+
+      const status = {
+        configId: 'config-abc',
+        state: 'running' as const,
+        pid: 1234,
+        startedAt: new Date().toISOString(),
+        uptimeMs: 5000,
+        exitCode: null,
+        restartCount: 0,
+        error: null,
+      };
+
+      expect(() => {
+        (mockRunProcessManager as EventEmitter).emit('status', 'project-1', 'config-abc', status);
+      }).not.toThrow();
+    });
+  });
+
+  describe('frontend error logger listener', () => {
+    it('should broadcast frontend_error when log store emits frontend_error', () => {
+      wsServer = new DefaultWebSocketServer({ agentManager: mockAgentManager });
+      wsServer.initialize({} as Server);
+
+      const { WebSocketServer: MockWebSocketServer } = jest.requireMock('ws');
+      const mockWssInstance = MockWebSocketServer.mock.results[0].value;
+      const mockClient = Array.from(mockWssInstance.clients)[0] as { send: jest.Mock };
+      mockClient.send.mockClear();
+
+      const logStore = getLogStore();
+      logStore.emit('frontend_error', {
+        level: 'error',
+        message: 'Test frontend error',
+        timestamp: new Date().toISOString(),
+        projectId: 'proj-1',
+        context: {
+          type: 'frontend',
+          clientId: 'client-123',
+          errorType: 'TypeError',
+          source: 'http://localhost/app.js',
+          userAgent: 'Chrome/120',
+          stack: 'Error: test\n  at test.js:1',
+          line: 42,
+          column: 5,
+        },
+      });
+
+      expect(mockClient.send).toHaveBeenCalledWith(
+        expect.stringContaining('"type":"frontend_error"')
+      );
+    });
+
+    it('should handle frontend_error with minimal context', () => {
+      wsServer = new DefaultWebSocketServer({ agentManager: mockAgentManager });
+
+      const logStore = getLogStore();
+      expect(() => {
+        logStore.emit('frontend_error', {
+          level: 'error',
+          message: 'Minimal error',
+          timestamp: new Date().toISOString(),
+        });
+      }).not.toThrow();
+    });
+  });
+
+  describe('saveRalphLoopMessage', () => {
+    let mockConversationRepo: jest.Mocked<ConversationRepository>;
+    let mockProjectRepo: jest.Mocked<ProjectRepository>;
+    let mockRalphLoop: RalphLoopService & EventEmitter;
+
+    beforeEach(() => {
+      mockConversationRepo = createMockConversationRepository();
+      mockProjectRepo = createMockProjectRepository();
+      mockRalphLoop = createMockRalphLoopService();
+    });
+
+    it('should skip saving when conversationRepository is not provided', async () => {
+      wsServer = new DefaultWebSocketServer({
+        agentManager: mockAgentManager,
+        ralphLoopService: mockRalphLoop,
+        projectRepository: mockProjectRepo,
+      });
+
+      mockRalphLoop.emit('output', 'proj-1', 'task-1', 'worker', 'some content');
+
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(mockProjectRepo.findById).not.toHaveBeenCalled();
+    });
+
+    it('should skip saving when projectRepository is not provided', async () => {
+      wsServer = new DefaultWebSocketServer({
+        agentManager: mockAgentManager,
+        ralphLoopService: mockRalphLoop,
+        conversationRepository: mockConversationRepo,
+      });
+
+      mockRalphLoop.emit('output', 'proj-1', 'task-1', 'worker', 'some content');
+
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(mockConversationRepo.addMessage).not.toHaveBeenCalled();
+    });
+
+    it('should skip saving when project has no currentConversationId', async () => {
+      mockProjectRepo.findById.mockResolvedValue({
+        id: 'proj-1',
+        name: 'Test',
+        path: '/path',
+        status: 'stopped',
+        currentConversationId: null,
+        nextItem: null,
+        currentItem: null,
+        lastContextUsage: null,
+        permissionOverrides: null,
+        modelOverride: null,
+        mcpOverrides: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      wsServer = new DefaultWebSocketServer({
+        agentManager: mockAgentManager,
+        ralphLoopService: mockRalphLoop,
+        conversationRepository: mockConversationRepo,
+        projectRepository: mockProjectRepo,
+      });
+
+      mockRalphLoop.emit('output', 'proj-1', 'task-1', 'worker', 'content');
+
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(mockConversationRepo.addMessage).not.toHaveBeenCalled();
+    });
+
+    it('should save ralph_loop_output message with phase', async () => {
+      mockProjectRepo.findById.mockResolvedValue({
+        id: 'proj-1',
+        name: 'Test',
+        path: '/path',
+        status: 'stopped',
+        currentConversationId: 'conv-123',
+        nextItem: null,
+        currentItem: null,
+        lastContextUsage: null,
+        permissionOverrides: null,
+        modelOverride: null,
+        mcpOverrides: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      wsServer = new DefaultWebSocketServer({
+        agentManager: mockAgentManager,
+        ralphLoopService: mockRalphLoop,
+        conversationRepository: mockConversationRepo,
+        projectRepository: mockProjectRepo,
+      });
+
+      mockRalphLoop.emit('output', 'proj-1', 'task-1', 'worker', 'output content');
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+      expect(mockConversationRepo.addMessage).toHaveBeenCalledWith(
+        'proj-1',
+        'conv-123',
+        expect.objectContaining({
+          type: 'stdout',
+          content: 'output content',
+          ralphLoopPhase: 'worker',
+        })
+      );
+    });
+
+    it('should save ralph_loop_iteration message', async () => {
+      mockProjectRepo.findById.mockResolvedValue({
+        id: 'proj-1',
+        name: 'Test',
+        path: '/path',
+        status: 'stopped',
+        currentConversationId: 'conv-123',
+        nextItem: null,
+        currentItem: null,
+        lastContextUsage: null,
+        permissionOverrides: null,
+        modelOverride: null,
+        mcpOverrides: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      wsServer = new DefaultWebSocketServer({
+        agentManager: mockAgentManager,
+        ralphLoopService: mockRalphLoop,
+        conversationRepository: mockConversationRepo,
+        projectRepository: mockProjectRepo,
+      });
+
+      mockRalphLoop.emit('iteration_start', 'proj-1', 'task-1', 2);
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+      expect(mockConversationRepo.addMessage).toHaveBeenCalledWith(
+        'proj-1',
+        'conv-123',
+        expect.objectContaining({ content: expect.stringContaining('Iteration 2') })
+      );
+    });
+
+    it('should save ralph_loop_worker_complete with files modified', async () => {
+      mockProjectRepo.findById.mockResolvedValue({
+        id: 'proj-1',
+        name: 'Test',
+        path: '/path',
+        status: 'stopped',
+        currentConversationId: 'conv-123',
+        nextItem: null,
+        currentItem: null,
+        lastContextUsage: null,
+        permissionOverrides: null,
+        modelOverride: null,
+        mcpOverrides: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      wsServer = new DefaultWebSocketServer({
+        agentManager: mockAgentManager,
+        ralphLoopService: mockRalphLoop,
+        conversationRepository: mockConversationRepo,
+        projectRepository: mockProjectRepo,
+      });
+
+      const summary = {
+        iterationNumber: 1,
+        timestamp: new Date().toISOString(),
+        workerOutput: 'done',
+        filesModified: ['src/index.ts', 'src/app.ts'],
+        tokensUsed: 100,
+        durationMs: 1000,
+      };
+
+      mockRalphLoop.emit('worker_complete', 'proj-1', 'task-1', summary);
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+      expect(mockConversationRepo.addMessage).toHaveBeenCalledWith(
+        'proj-1',
+        'conv-123',
+        expect.objectContaining({
+          content: expect.stringContaining('src/index.ts'),
+        })
+      );
+    });
+
+    it('should save ralph_loop_worker_complete without files', async () => {
+      mockProjectRepo.findById.mockResolvedValue({
+        id: 'proj-1',
+        name: 'Test',
+        path: '/path',
+        status: 'stopped',
+        currentConversationId: 'conv-123',
+        nextItem: null,
+        currentItem: null,
+        lastContextUsage: null,
+        permissionOverrides: null,
+        modelOverride: null,
+        mcpOverrides: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      wsServer = new DefaultWebSocketServer({
+        agentManager: mockAgentManager,
+        ralphLoopService: mockRalphLoop,
+        conversationRepository: mockConversationRepo,
+        projectRepository: mockProjectRepo,
+      });
+
+      const summary = {
+        iterationNumber: 1,
+        timestamp: new Date().toISOString(),
+        workerOutput: 'done',
+        filesModified: [],
+        tokensUsed: 100,
+        durationMs: 1000,
+      };
+
+      mockRalphLoop.emit('worker_complete', 'proj-1', 'task-1', summary);
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+      expect(mockConversationRepo.addMessage).toHaveBeenCalledWith(
+        'proj-1',
+        'conv-123',
+        expect.objectContaining({ content: 'Worker completed iteration 1' })
+      );
+    });
+
+    it('should save ralph_loop_reviewer_complete with feedback', async () => {
+      mockProjectRepo.findById.mockResolvedValue({
+        id: 'proj-1',
+        name: 'Test',
+        path: '/path',
+        status: 'stopped',
+        currentConversationId: 'conv-123',
+        nextItem: null,
+        currentItem: null,
+        lastContextUsage: null,
+        permissionOverrides: null,
+        modelOverride: null,
+        mcpOverrides: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      wsServer = new DefaultWebSocketServer({
+        agentManager: mockAgentManager,
+        ralphLoopService: mockRalphLoop,
+        conversationRepository: mockConversationRepo,
+        projectRepository: mockProjectRepo,
+      });
+
+      const feedback = {
+        iterationNumber: 1,
+        timestamp: new Date().toISOString(),
+        decision: 'needs_changes' as const,
+        feedback: 'Please add tests',
+        specificIssues: [],
+        suggestedImprovements: [],
+      };
+
+      mockRalphLoop.emit('reviewer_complete', 'proj-1', 'task-1', feedback);
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+      expect(mockConversationRepo.addMessage).toHaveBeenCalledWith(
+        'proj-1',
+        'conv-123',
+        expect.objectContaining({
+          content: expect.stringContaining('Please add tests'),
+        })
+      );
+    });
+
+    it('should save ralph_loop_reviewer_complete without feedback text', async () => {
+      mockProjectRepo.findById.mockResolvedValue({
+        id: 'proj-1',
+        name: 'Test',
+        path: '/path',
+        status: 'stopped',
+        currentConversationId: 'conv-123',
+        nextItem: null,
+        currentItem: null,
+        lastContextUsage: null,
+        permissionOverrides: null,
+        modelOverride: null,
+        mcpOverrides: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      wsServer = new DefaultWebSocketServer({
+        agentManager: mockAgentManager,
+        ralphLoopService: mockRalphLoop,
+        conversationRepository: mockConversationRepo,
+        projectRepository: mockProjectRepo,
+      });
+
+      const feedback = {
+        iterationNumber: 1,
+        timestamp: new Date().toISOString(),
+        decision: 'approved' as const,
+        feedback: null,
+        specificIssues: [],
+        suggestedImprovements: [],
+      };
+
+      mockRalphLoop.emit('reviewer_complete', 'proj-1', 'task-1', feedback);
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+      expect(mockConversationRepo.addMessage).toHaveBeenCalledWith(
+        'proj-1',
+        'conv-123',
+        expect.objectContaining({ content: 'Reviewer decision: approved' })
+      );
+    });
+
+    it('should save ralph_loop_complete message', async () => {
+      mockProjectRepo.findById.mockResolvedValue({
+        id: 'proj-1',
+        name: 'Test',
+        path: '/path',
+        status: 'stopped',
+        currentConversationId: 'conv-123',
+        nextItem: null,
+        currentItem: null,
+        lastContextUsage: null,
+        permissionOverrides: null,
+        modelOverride: null,
+        mcpOverrides: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      wsServer = new DefaultWebSocketServer({
+        agentManager: mockAgentManager,
+        ralphLoopService: mockRalphLoop,
+        conversationRepository: mockConversationRepo,
+        projectRepository: mockProjectRepo,
+      });
+
+      mockRalphLoop.emit('loop_complete', 'proj-1', 'task-1', 'approved');
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+      expect(mockConversationRepo.addMessage).toHaveBeenCalledWith(
+        'proj-1',
+        'conv-123',
+        expect.objectContaining({ content: 'Ralph Loop completed: approved' })
+      );
+    });
+
+    it('should save ralph_loop_error message', async () => {
+      mockProjectRepo.findById.mockResolvedValue({
+        id: 'proj-1',
+        name: 'Test',
+        path: '/path',
+        status: 'stopped',
+        currentConversationId: 'conv-123',
+        nextItem: null,
+        currentItem: null,
+        lastContextUsage: null,
+        permissionOverrides: null,
+        modelOverride: null,
+        mcpOverrides: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      wsServer = new DefaultWebSocketServer({
+        agentManager: mockAgentManager,
+        ralphLoopService: mockRalphLoop,
+        conversationRepository: mockConversationRepo,
+        projectRepository: mockProjectRepo,
+      });
+
+      mockRalphLoop.emit('loop_error', 'proj-1', 'task-1', 'Worker crashed');
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+      expect(mockConversationRepo.addMessage).toHaveBeenCalledWith(
+        'proj-1',
+        'conv-123',
+        expect.objectContaining({ content: 'Ralph Loop error: Worker crashed' })
+      );
+    });
+
+    it('should save ralph_loop_tool_use message', async () => {
+      mockProjectRepo.findById.mockResolvedValue({
+        id: 'proj-1',
+        name: 'Test',
+        path: '/path',
+        status: 'stopped',
+        currentConversationId: 'conv-123',
+        nextItem: null,
+        currentItem: null,
+        lastContextUsage: null,
+        permissionOverrides: null,
+        modelOverride: null,
+        mcpOverrides: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      wsServer = new DefaultWebSocketServer({
+        agentManager: mockAgentManager,
+        ralphLoopService: mockRalphLoop,
+        conversationRepository: mockConversationRepo,
+        projectRepository: mockProjectRepo,
+      });
+
+      const toolInfo = {
+        tool_name: 'Bash',
+        tool_id: 'tool-xyz',
+        parameters: { command: 'npm test' },
+        timestamp: new Date().toISOString(),
+      };
+
+      mockRalphLoop.emit('tool_use', 'proj-1', 'task-1', 'worker', toolInfo);
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+      expect(mockConversationRepo.addMessage).toHaveBeenCalledWith(
+        'proj-1',
+        'conv-123',
+        expect.objectContaining({
+          type: 'tool_use',
+          content: 'Bash',
+        })
+      );
+    });
+
+    it('should handle error in saveRalphLoopMessage gracefully', async () => {
+      mockProjectRepo.findById.mockRejectedValue(new Error('DB Error'));
+
+      wsServer = new DefaultWebSocketServer({
+        agentManager: mockAgentManager,
+        ralphLoopService: mockRalphLoop,
+        conversationRepository: mockConversationRepo,
+        projectRepository: mockProjectRepo,
+      });
+
+      expect(() => {
+        mockRalphLoop.emit('output', 'proj-1', 'task-1', 'worker', 'content');
+      }).not.toThrow();
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+    });
+  });
+
+  describe('heartbeat', () => {
+    beforeEach(() => {
+      jest.useFakeTimers();
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    const makeHeartbeatClient = (isAlive: boolean) => ({
+      isAlive,
+      terminate: jest.fn(),
+      ping: jest.fn(),
+      readyState: 1,
+      close: jest.fn(),
+      send: jest.fn(),
+    });
+
+    it('should terminate unresponsive clients', () => {
+      wsServer = new DefaultWebSocketServer({ agentManager: mockAgentManager });
+      wsServer.initialize({} as Server);
+
+      const { WebSocketServer: MockWebSocketServer } = jest.requireMock('ws');
+      const mockWssInstance = MockWebSocketServer.mock.results[0].value;
+
+      const unresponsiveClient = makeHeartbeatClient(false);
+      mockWssInstance.clients.clear();
+      mockWssInstance.clients.add(unresponsiveClient);
+
+      jest.advanceTimersByTime(30000);
+
+      expect(unresponsiveClient.terminate).toHaveBeenCalled();
+    });
+
+    it('should ping live clients and mark them as pending', () => {
+      wsServer = new DefaultWebSocketServer({ agentManager: mockAgentManager });
+      wsServer.initialize({} as Server);
+
+      const { WebSocketServer: MockWebSocketServer } = jest.requireMock('ws');
+      const mockWssInstance = MockWebSocketServer.mock.results[0].value;
+
+      const liveClient = makeHeartbeatClient(true);
+      mockWssInstance.clients.clear();
+      mockWssInstance.clients.add(liveClient);
+
+      jest.advanceTimersByTime(30000);
+
+      expect(liveClient.ping).toHaveBeenCalled();
+      expect(liveClient.isAlive).toBe(false);
+    });
+
+    it('should not ping when wss is null (after close)', () => {
+      wsServer = new DefaultWebSocketServer({ agentManager: mockAgentManager });
+      wsServer.initialize({} as Server);
+
+      const { WebSocketServer: MockWebSocketServer } = jest.requireMock('ws');
+      const mockWssInstance = MockWebSocketServer.mock.results[0].value;
+
+      // Use a client with close so wsServer.close() doesn't fail
+      const client = makeHeartbeatClient(true);
+      mockWssInstance.clients.clear();
+      mockWssInstance.clients.add(client);
+
+      // close() clears the wss and cancels pingInterval
+      wsServer.close();
+
+      jest.advanceTimersByTime(30000);
+
+      // After close, pingInterval is cleared, so ping should not be called
+      expect(client.ping).not.toHaveBeenCalled();
+    });
+
+    it('should handle pong to mark client as alive', () => {
+      wsServer = new DefaultWebSocketServer({ agentManager: mockAgentManager });
+      const mockHttpServer = new EventEmitter() as Server;
+      wsServer.initialize(mockHttpServer);
+
+      const { WebSocketServer: MockWebSocketServer } = jest.requireMock('ws');
+      const mockWssInstance = MockWebSocketServer.mock.results[0].value;
+      const connectionHandler = mockWssInstance.on.mock.calls.find(
+        ([event]: [string]) => event === 'connection'
+      )[1];
+
+      let pongHandler: (() => void) | null = null;
+      const testWs = {
+        isAlive: false,
+        readyState: 1,
+        send: jest.fn(),
+        ping: jest.fn(),
+        terminate: jest.fn(),
+        on: jest.fn((event: string, handler: () => void) => {
+          if (event === 'pong') {
+            pongHandler = handler;
+          }
+        }),
+        close: jest.fn(),
+      };
+
+      // Replace clients with testWs so close() works
+      mockWssInstance.clients.clear();
+      mockWssInstance.clients.add(testWs);
+
+      connectionHandler(testWs);
+
+      expect(testWs.isAlive).toBe(true);
+
+      testWs.isAlive = false;
+      pongHandler!();
+
+      expect(testWs.isAlive).toBe(true);
     });
   });
 });
