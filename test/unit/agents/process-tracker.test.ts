@@ -216,4 +216,135 @@ describe('ProcessTracker', () => {
       expect(() => tracker.persist()).not.toThrow();
     });
   });
+
+  describe('cleanupOrphanProcesses - stubborn process', () => {
+    it('should force kill process that survives SIGTERM', async () => {
+      const { getPidTracker } = jest.requireMock('../../../src/utils');
+      getPidTracker().getTrackedProcesses.mockReturnValue([
+        { projectId: 'proj-stub', pid: 77777 },
+      ]);
+
+      let killCount = 0;
+      const killSpy = jest.spyOn(process, 'kill').mockImplementation((_pid, signal) => {
+        killCount++;
+        // signal 0 checks: process is always running (never throws)
+        if (signal === 0) return true;
+        // SIGTERM: ok but process stays alive
+        if (signal === 'SIGTERM') return true;
+        // SIGKILL: ok but process stays alive (stubborn)
+        if (signal === 'SIGKILL') return true;
+        return true;
+      });
+
+      const freshTracker = new ProcessTracker();
+      const result = await freshTracker.cleanupOrphanProcesses();
+
+      // Process refused to die even after SIGKILL
+      expect(result.foundCount).toBe(1);
+      expect(result.failedPids).toContain(77777);
+      expect(result.killedCount).toBe(0);
+      // Verify SIGKILL was attempted
+      expect(killSpy).toHaveBeenCalledWith(77777, 'SIGKILL');
+
+      killSpy.mockRestore();
+    });
+
+    it('should force kill and succeed when process dies after SIGKILL', async () => {
+      const { getPidTracker } = jest.requireMock('../../../src/utils');
+      getPidTracker().getTrackedProcesses.mockReturnValue([
+        { projectId: 'proj-force', pid: 88888 },
+      ]);
+
+      let sigCheckCount = 0;
+      const killSpy = jest.spyOn(process, 'kill').mockImplementation((_pid, signal) => {
+        if (signal === 0) {
+          sigCheckCount++;
+          // First two signal-0 checks: process alive
+          // Third signal-0 check (after SIGKILL): process dead
+          if (sigCheckCount >= 3) {
+            throw new Error('ESRCH');
+          }
+          return true;
+        }
+        // SIGTERM and SIGKILL succeed without error
+        return true;
+      });
+
+      const freshTracker = new ProcessTracker();
+      const result = await freshTracker.cleanupOrphanProcesses();
+
+      expect(result.foundCount).toBe(1);
+      expect(result.killedCount).toBe(1);
+      expect(result.killedPids).toContain(88888);
+
+      killSpy.mockRestore();
+    });
+
+    it('should handle non-ESRCH error during kill', async () => {
+      const { getPidTracker } = jest.requireMock('../../../src/utils');
+      getPidTracker().getTrackedProcesses.mockReturnValue([
+        { projectId: 'proj-eperm', pid: 66666 },
+      ]);
+
+      const killSpy = jest.spyOn(process, 'kill').mockImplementation((_pid, signal) => {
+        // signal 0: process exists
+        if (signal === 0) return true;
+        // SIGTERM: permission denied
+        throw new Error('EPERM: operation not permitted');
+      });
+
+      const freshTracker = new ProcessTracker();
+      const result = await freshTracker.cleanupOrphanProcesses();
+
+      expect(result.foundCount).toBe(1);
+      expect(result.failedPids).toContain(66666);
+      // Non-ESRCH error should NOT add to skipped
+      expect(result.skippedPids).not.toContain(66666);
+
+      killSpy.mockRestore();
+    });
+
+    it('should handle "No such process" error message variant', async () => {
+      const { getPidTracker } = jest.requireMock('../../../src/utils');
+      getPidTracker().getTrackedProcesses.mockReturnValue([
+        { projectId: 'proj-nosuch', pid: 44444 },
+      ]);
+
+      const killSpy = jest.spyOn(process, 'kill').mockImplementation((_pid, signal) => {
+        if (signal === 0) return true;
+        throw new Error('No such process');
+      });
+
+      const freshTracker = new ProcessTracker();
+      const result = await freshTracker.cleanupOrphanProcesses();
+
+      expect(result.foundCount).toBe(1);
+      expect(result.skippedPids).toContain(44444);
+
+      killSpy.mockRestore();
+    });
+
+    it('should handle non-Error throw during kill', async () => {
+      const { getPidTracker } = jest.requireMock('../../../src/utils');
+      getPidTracker().getTrackedProcesses.mockReturnValue([
+        { projectId: 'proj-str', pid: 33333 },
+      ]);
+
+      const killSpy = jest.spyOn(process, 'kill').mockImplementation((_pid, signal) => {
+        if (signal === 0) return true;
+        // eslint-disable-next-line no-throw-literal
+        throw 'string error';
+      });
+
+      const freshTracker = new ProcessTracker();
+      const result = await freshTracker.cleanupOrphanProcesses();
+
+      expect(result.foundCount).toBe(1);
+      expect(result.failedPids).toContain(33333);
+      // Non-Error throws should NOT add to skipped
+      expect(result.skippedPids).not.toContain(33333);
+
+      killSpy.mockRestore();
+    });
+  });
 });

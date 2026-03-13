@@ -1,4 +1,5 @@
 import {
+  FileRepositoryFactory,
   InMemoryRepositoryFactory,
   createMockRepositoryFactory,
 } from '../../../src/repositories/factories';
@@ -8,6 +9,84 @@ import {
   ISettingsRepository,
   IRalphLoopRepository,
 } from '../../../src/repositories/interfaces';
+
+jest.mock('../../../src/repositories/project', () => ({
+  FileProjectRepository: jest.fn().mockImplementation(() => ({
+    findAll: jest.fn(),
+    findById: jest.fn(),
+  })),
+}));
+
+jest.mock('../../../src/repositories/conversation', () => ({
+  FileConversationRepository: jest.fn().mockImplementation(() => ({
+    create: jest.fn(),
+    findById: jest.fn(),
+  })),
+}));
+
+jest.mock('../../../src/repositories/settings', () => ({
+  FileSettingsRepository: jest.fn().mockImplementation(() => ({
+    get: jest.fn(),
+    update: jest.fn(),
+  })),
+}));
+
+jest.mock('../../../src/repositories/ralph-loop', () => ({
+  FileRalphLoopRepository: jest.fn().mockImplementation(() => ({
+    create: jest.fn(),
+    findById: jest.fn(),
+  })),
+}));
+
+jest.mock('../../../src/utils', () => ({
+  getDataDirectory: jest.fn().mockReturnValue('/mock/data/dir'),
+  getLogger: jest.fn().mockReturnValue({
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+  }),
+}));
+
+describe('FileRepositoryFactory', () => {
+  const mockPathResolver = { getProjectPath: jest.fn().mockReturnValue('/mock/project/path') };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('should create a project repository', () => {
+    const factory = new FileRepositoryFactory(mockPathResolver);
+    const repo = factory.createProjectRepository();
+
+    expect(repo).toBeDefined();
+    expect(repo.findAll).toBeDefined();
+  });
+
+  it('should create a conversation repository', () => {
+    const factory = new FileRepositoryFactory(mockPathResolver);
+    const repo = factory.createConversationRepository();
+
+    expect(repo).toBeDefined();
+    expect(repo.create).toBeDefined();
+  });
+
+  it('should create a settings repository', () => {
+    const factory = new FileRepositoryFactory(mockPathResolver);
+    const repo = factory.createSettingsRepository();
+
+    expect(repo).toBeDefined();
+    expect(repo.get).toBeDefined();
+  });
+
+  it('should create a ralph loop repository', () => {
+    const factory = new FileRepositoryFactory(mockPathResolver);
+    const repo = factory.createRalphLoopRepository();
+
+    expect(repo).toBeDefined();
+    expect(repo.create).toBeDefined();
+  });
+});
 
 describe('InMemoryRepositoryFactory', () => {
   describe('with mocks provided', () => {
