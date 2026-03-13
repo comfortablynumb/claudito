@@ -3651,4 +3651,135 @@ describe('DefaultAgentManager', () => {
     });
   });
 
+  describe('resolveProfileForProject', () => {
+    it('should return matching profile when project has agentProfileId', async () => {
+      const customProfile = {
+        id: 'custom-profile-1',
+        name: 'Custom Profile',
+        provider: 'anthropic' as const,
+        isDefault: false,
+        anthropicConfig: { runtime: 'claude-binary' as const },
+      };
+
+      // Set up project with agentProfileId
+      const projectWithProfile = createTestProject({
+        id: 'test-project',
+        path: '/test/path',
+      });
+      (projectWithProfile as unknown as Record<string, unknown>).agentProfileId = 'custom-profile-1';
+      mockProjectRepo.findById.mockResolvedValue(projectWithProfile);
+
+      // Set up settings with matching profile
+      mockSettingsRepo.get.mockResolvedValue({
+        ...require('../helpers/mock-factories').DEFAULT_TEST_SETTINGS,
+        agentProfiles: [customProfile],
+      });
+
+      await agentManager.startInteractiveAgent('test-project');
+
+      // Verify the agent was created with the custom profile
+      expect(mockAgentFactory.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentProfile: customProfile,
+        })
+      );
+    });
+
+    it('should fall back to default profile when agentProfileId does not match', async () => {
+      const defaultProfile = {
+        id: 'default-prof',
+        name: 'Default',
+        provider: 'anthropic' as const,
+        isDefault: true,
+        anthropicConfig: { runtime: 'claude-binary' as const },
+      };
+
+      const projectWithProfile = createTestProject({
+        id: 'test-project',
+        path: '/test/path',
+      });
+      (projectWithProfile as unknown as Record<string, unknown>).agentProfileId = 'non-existent-id';
+      mockProjectRepo.findById.mockResolvedValue(projectWithProfile);
+
+      mockSettingsRepo.get.mockResolvedValue({
+        ...require('../helpers/mock-factories').DEFAULT_TEST_SETTINGS,
+        agentProfiles: [defaultProfile],
+      });
+
+      await agentManager.startInteractiveAgent('test-project');
+
+      expect(mockAgentFactory.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentProfile: defaultProfile,
+        })
+      );
+    });
+
+    it('should fall back to first profile when no default exists', async () => {
+      const firstProfile = {
+        id: 'first',
+        name: 'First',
+        provider: 'anthropic' as const,
+        isDefault: false,
+      };
+
+      mockSettingsRepo.get.mockResolvedValue({
+        ...require('../helpers/mock-factories').DEFAULT_TEST_SETTINGS,
+        agentProfiles: [firstProfile],
+      });
+
+      await agentManager.startInteractiveAgent('test-project');
+
+      expect(mockAgentFactory.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentProfile: firstProfile,
+        })
+      );
+    });
+  });
+
+  describe('runMilestone project not found', () => {
+    it('should log error and return when project not found during milestone run', async () => {
+      const milestone = { milestoneId: 'ms-1', phaseId: 'phase-1' };
+
+      // startAutonomousLoop calls runMilestone internally
+      mockLoopOrchestrator.startLoop.mockResolvedValue(milestone);
+
+      // First findById returns project (for startAutonomousLoop check),
+      // second returns null (for runMilestone)
+      mockProjectRepo.findById
+        .mockResolvedValueOnce(testProject) // startAutonomousLoop project lookup
+        .mockResolvedValueOnce(null);       // runMilestone project lookup
+
+      await agentManager.startAutonomousLoop('test-project');
+
+      // Should not have created a conversation or started an agent
+      expect(mockConversationRepo.create).not.toHaveBeenCalled();
+      expect(mockAgentFactory.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('handleStatusChange emit coverage', () => {
+    it('should call emit with status event before updating project status', async () => {
+      const statusHandler = jest.fn();
+      agentManager.on('status', statusHandler);
+
+      await agentManager.startInteractiveAgent('test-project');
+
+      // Clear previous calls from start
+      statusHandler.mockClear();
+      mockProjectRepo.updateStatus.mockClear();
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('status', 'error');
+
+      // Give time for the async handleStatusChange to run
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Both emit and updateStatus should have been called
+      expect(statusHandler).toHaveBeenCalledWith('test-project', 'error');
+      expect(mockProjectRepo.updateStatus).toHaveBeenCalledWith('test-project', 'error');
+    });
+  });
+
 });
