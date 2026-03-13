@@ -446,4 +446,290 @@ describe('ReviewerAgent - Extended Coverage', () => {
       await runPromise;
     });
   });
+
+  describe('MCP server configuration', () => {
+    it('should pass --mcp-config when mcpServers are configured', async () => {
+      const mockGenerateMcpConfig = jest.spyOn(
+        require('../../../../src/agents/message-builder').MessageBuilder,
+        'generateMcpConfig'
+      ).mockReturnValue('/tmp/mcp-config.json');
+
+      agent = new ReviewerAgent(
+        {
+          projectPath: '/test/project',
+          model: 'claude-opus-4-6',
+          contextInitializer: mockContextInitializer,
+          mcpServers: [{ id: 'test-1', name: 'test-server', enabled: true, type: 'http', url: 'http://localhost:3000' }],
+        },
+        mockSpawner
+      );
+
+      const state = createTestRalphLoopState();
+      const runPromise = agent.run(state, 'Worker output');
+
+      const args = mockSpawner.spawn.mock.calls[0]![1] as string[];
+      expect(args).toContain('--mcp-config');
+      expect(args).toContain('/tmp/mcp-config.json');
+
+      sendFeedbackAndExit({ decision: 'approve', feedback: 'ok' });
+      await runPromise;
+
+      mockGenerateMcpConfig.mockRestore();
+    });
+
+    it('should not pass --mcp-config when generateMcpConfig returns null', async () => {
+      const mockGenerateMcpConfig = jest.spyOn(
+        require('../../../../src/agents/message-builder').MessageBuilder,
+        'generateMcpConfig'
+      ).mockReturnValue(null);
+
+      agent = new ReviewerAgent(
+        {
+          projectPath: '/test/project',
+          model: 'claude-opus-4-6',
+          contextInitializer: mockContextInitializer,
+          mcpServers: [{ id: 'test-1', name: 'test-server', enabled: true, type: 'http', url: 'http://localhost:3000' }],
+        },
+        mockSpawner
+      );
+
+      const state = createTestRalphLoopState();
+      const runPromise = agent.run(state, 'Worker output');
+
+      const args = mockSpawner.spawn.mock.calls[0]![1] as string[];
+      expect(args).not.toContain('--mcp-config');
+
+      sendFeedbackAndExit({ decision: 'approve', feedback: 'ok' });
+      await runPromise;
+
+      mockGenerateMcpConfig.mockRestore();
+    });
+
+    it('should not add --mcp-config when mcpServers is empty', async () => {
+      agent = new ReviewerAgent(
+        {
+          projectPath: '/test/project',
+          model: 'claude-opus-4-6',
+          contextInitializer: mockContextInitializer,
+          mcpServers: [],
+        },
+        mockSpawner
+      );
+
+      const state = createTestRalphLoopState();
+      const runPromise = agent.run(state, 'Worker output');
+
+      const args = mockSpawner.spawn.mock.calls[0]![1] as string[];
+      expect(args).not.toContain('--mcp-config');
+
+      sendFeedbackAndExit({ decision: 'approve', feedback: 'ok' });
+      await runPromise;
+    });
+  });
+
+  describe('MCP config cleanup on stop', () => {
+    it('should delete MCP config file when stopping', async () => {
+      const mockUnlinkSync = jest.spyOn(require('fs'), 'unlinkSync').mockImplementation(() => {});
+      const mockGenerateMcpConfig = jest.spyOn(
+        require('../../../../src/agents/message-builder').MessageBuilder,
+        'generateMcpConfig'
+      ).mockReturnValue('/tmp/mcp-reviewer.json');
+
+      agent = new ReviewerAgent(
+        {
+          projectPath: '/test/project',
+          model: 'claude-opus-4-6',
+          contextInitializer: mockContextInitializer,
+          mcpServers: [{ id: 'srv-1', name: 'srv', enabled: true, type: 'http', url: 'http://localhost' }],
+        },
+        mockSpawner
+      );
+
+      const state = createTestRalphLoopState();
+      const runPromise = agent.run(state, 'Worker output');
+
+      // Start stop, then emit exit to satisfy both the stop promise and run promise
+      const stopPromise = agent.stop();
+      // Emit exit shortly after so the 'exit' listener in stop() fires
+      setImmediate(() => mockProcess.emit('exit', null));
+
+      await stopPromise;
+      await expect(runPromise).rejects.toThrow('Reviewer was stopped');
+      expect(mockUnlinkSync).toHaveBeenCalledWith('/tmp/mcp-reviewer.json');
+
+      mockUnlinkSync.mockRestore();
+      mockGenerateMcpConfig.mockRestore();
+    });
+
+    it('should handle MCP config file deletion error gracefully', async () => {
+      const mockUnlinkSync = jest.spyOn(require('fs'), 'unlinkSync').mockImplementation(() => {
+        throw new Error('ENOENT: no such file');
+      });
+      const mockGenerateMcpConfig = jest.spyOn(
+        require('../../../../src/agents/message-builder').MessageBuilder,
+        'generateMcpConfig'
+      ).mockReturnValue('/tmp/mcp-reviewer.json');
+
+      agent = new ReviewerAgent(
+        {
+          projectPath: '/test/project',
+          model: 'claude-opus-4-6',
+          contextInitializer: mockContextInitializer,
+          mcpServers: [{ id: 'srv-1', name: 'srv', enabled: true, type: 'http', url: 'http://localhost' }],
+        },
+        mockSpawner
+      );
+
+      const state = createTestRalphLoopState();
+      const runPromise = agent.run(state, 'Worker output');
+
+      // Should not throw even if unlink fails
+      const stopPromise = agent.stop();
+      setImmediate(() => mockProcess.emit('exit', null));
+
+      await stopPromise;
+      await expect(runPromise).rejects.toThrow('Reviewer was stopped');
+
+      mockUnlinkSync.mockRestore();
+      mockGenerateMcpConfig.mockRestore();
+    });
+  });
+
+  describe('MCP config cleanup on exit', () => {
+    it('should delete MCP config file on successful exit', async () => {
+      const mockUnlinkSync = jest.spyOn(require('fs'), 'unlinkSync').mockImplementation(() => {});
+      const mockGenerateMcpConfig = jest.spyOn(
+        require('../../../../src/agents/message-builder').MessageBuilder,
+        'generateMcpConfig'
+      ).mockReturnValue('/tmp/mcp-exit.json');
+
+      agent = new ReviewerAgent(
+        {
+          projectPath: '/test/project',
+          model: 'claude-opus-4-6',
+          contextInitializer: mockContextInitializer,
+          mcpServers: [{ id: 'srv-1', name: 'srv', enabled: true, type: 'http', url: 'http://localhost' }],
+        },
+        mockSpawner
+      );
+
+      const state = createTestRalphLoopState();
+      const runPromise = agent.run(state, 'Worker output');
+
+      sendFeedbackAndExit({ decision: 'approve', feedback: 'done' });
+      await runPromise;
+
+      // unlinkSync called during stop (if applicable) or exit cleanup
+      expect(mockUnlinkSync).toHaveBeenCalledWith('/tmp/mcp-exit.json');
+
+      mockUnlinkSync.mockRestore();
+      mockGenerateMcpConfig.mockRestore();
+    });
+
+    it('should handle MCP config deletion error on exit gracefully', async () => {
+      const mockUnlinkSync = jest.spyOn(require('fs'), 'unlinkSync').mockImplementation(() => {
+        throw new Error('Permission denied');
+      });
+      const mockGenerateMcpConfig = jest.spyOn(
+        require('../../../../src/agents/message-builder').MessageBuilder,
+        'generateMcpConfig'
+      ).mockReturnValue('/tmp/mcp-exit-err.json');
+
+      agent = new ReviewerAgent(
+        {
+          projectPath: '/test/project',
+          model: 'claude-opus-4-6',
+          contextInitializer: mockContextInitializer,
+          mcpServers: [{ id: 'srv-1', name: 'srv', enabled: true, type: 'http', url: 'http://localhost' }],
+        },
+        mockSpawner
+      );
+
+      const state = createTestRalphLoopState();
+      const runPromise = agent.run(state, 'Worker output');
+
+      sendFeedbackAndExit({ decision: 'approve', feedback: 'done' });
+
+      // Should not throw despite unlink error
+      await runPromise;
+
+      mockUnlinkSync.mockRestore();
+      mockGenerateMcpConfig.mockRestore();
+    });
+  });
+
+  describe('sendContext without stdin', () => {
+    it('should handle missing stdin gracefully', async () => {
+      const noStdinProcess = new MockChildProcess();
+      Object.defineProperty(noStdinProcess, 'stdin', { value: null });
+      noStdinProcess.pid = 99999;
+      mockSpawner.spawn.mockReturnValue(noStdinProcess);
+
+      agent.on('error', () => {});
+
+      const state = createTestRalphLoopState();
+      const runPromise = agent.run(state, 'Worker output');
+
+      // Process exits immediately since no context sent
+      noStdinProcess.emit('exit', 0);
+
+      // Should create fallback feedback
+      const result = await runPromise;
+      expect(result.decision).toBe('needs_changes');
+    });
+  });
+
+  describe('stop with force kill timeout', () => {
+    it('should force kill after timeout if process does not exit', async () => {
+      jest.useFakeTimers();
+
+      const state = createTestRalphLoopState();
+      const runPromise = agent.run(state, 'Worker output');
+
+      const stopPromise = agent.stop();
+
+      // Advance past the 5s forceKill timeout
+      jest.advanceTimersByTime(5100);
+
+      // Then process exits
+      mockProcess.emit('exit', null);
+
+      await stopPromise;
+      await expect(runPromise).rejects.toThrow('Reviewer was stopped');
+
+      jest.useRealTimers();
+    });
+  });
+
+  describe('stop when process becomes null during stop', () => {
+    it('should handle isStopping when already stopping', async () => {
+      const state = createTestRalphLoopState();
+      const runPromise = agent.run(state, 'Worker output');
+
+      // First stop call
+      const stop1 = agent.stop();
+      // Second stop call while first is in progress (isStopping = true)
+      const stop2 = agent.stop();
+
+      mockProcess.emit('exit', null);
+
+      await stop1;
+      await stop2;
+      await expect(runPromise).rejects.toThrow('Reviewer was stopped');
+    });
+  });
+
+  describe('killProcessTree on stop', () => {
+    it('should call kill on process when stopping with valid pid', async () => {
+      const state = createTestRalphLoopState();
+      const runPromise = agent.run(state, 'Worker output');
+
+      // Stop the agent - it will try to kill the process tree
+      const stopPromise = agent.stop();
+      mockProcess.emit('exit', null);
+
+      await stopPromise;
+      await expect(runPromise).rejects.toThrow('Reviewer was stopped');
+    });
+  });
 });
