@@ -928,3 +928,99 @@ describe('SlackCommandService — subscribeOneOffToSlack result delivery', () =>
     );
   });
 });
+
+// ============================================================================
+// Tests: error paths and factory
+// ============================================================================
+
+describe('SlackCommandService — error paths and factory', () => {
+  it('catches and logs error in message event handler', async () => {
+    const { deps, getMessageHandler } = createSetup();
+    // Make findAll throw to trigger catch in the message event handler wrapper
+    deps.projectRepository.findAll.mockRejectedValue(new Error('DB down'));
+    const handler = getMessageHandler();
+
+    // Should not throw
+    await handler({ type: 'message', text: 'hello', channel: 'C_ANY', ts: 'ts-err' }, ack);
+
+    // The error is caught internally (line 186)
+  });
+
+  it('catches error when reply sendMessage fails', async () => {
+    const { deps } = createSetup();
+    deps.slackService.sendMessage.mockRejectedValue(new Error('Slack API down'));
+
+    const socketService = deps.socketService;
+    const service = new DefaultSlackCommandService({
+      agentManager: deps.agentManager,
+      slackService: deps.slackService,
+      slackSocketService: socketService,
+      projectRepository: deps.projectRepository,
+      settingsRepository: deps.settingsRepository,
+      threadTracker: deps.threadTracker,
+    } as SlackCommandServiceDeps);
+    service.register();
+
+    const slashHandler = (socketService.onSlashCommand as jest.Mock).mock.calls[0][0] as
+      (body: SlashCommandBody, ack: () => Promise<void>) => Promise<void>;
+
+    // help command triggers reply which calls sendMessage
+    await slashHandler({
+      command: '/claudito',
+      text: 'help',
+      channel_id: 'C1',
+      user_id: 'U1',
+      response_url: '',
+    } as SlashCommandBody, ack);
+
+    // Should not throw - error is caught at line 203
+  });
+
+  it('handles project not found during handleProjectSelected', async () => {
+    const { deps, getMessageHandler, getInteractiveHandler } = createSetup({ projects: [] });
+
+    const msgHandler = getMessageHandler();
+    const actionHandler = getInteractiveHandler();
+
+    deps.slackService.replyInThread.mockResolvedValueOnce('ts-selector');
+
+    // Use a non-empty project list for the top-level message so selector is posted
+    deps.projectRepository.findAll.mockResolvedValueOnce([sampleProject]);
+    await msgHandler({ type: 'message', text: 'hello', channel: 'C_ANY', ts: 'ts-sel', user: 'U_ANY' }, ack);
+
+    // Now when interactive action fires, findAll returns empty list
+    deps.projectRepository.findAll.mockResolvedValue([]);
+
+    const actionBody = {
+      actions: [{ action_id: 'select_project_0', value: `${sampleProject.id}|C_ANY|ts-sel` }],
+      user: { id: 'U_ANY' },
+    } as unknown as InteractiveActionBody;
+
+    await actionHandler(actionBody, ack);
+
+    // Should have replied with "Project not found" (line 411)
+    expect(deps.slackService.replyInThread).toHaveBeenCalledWith(
+      'xoxb-test', 'C_ANY', 'ts-sel',
+      expect.stringContaining('Project not found'),
+    );
+  });
+});
+
+describe('createSlackCommandService factory', () => {
+  it('returns a SlackCommandService instance', () => {
+    const { createSlackCommandService } = require('../../../src/services/slack-command-service');
+    const deps = {
+      agentManager: createMockAgentManager(),
+      slackService: createMockSlackService(),
+      slackSocketService: createMockSocketService(),
+      projectRepository: createMockProjectRepository(),
+      settingsRepository: createMockSettingsRepository(),
+      threadTracker: createMockTracker(),
+    };
+
+    const service = createSlackCommandService(deps);
+
+    expect(service).toBeDefined();
+    expect(typeof service.register).toBe('function');
+  });
+});
