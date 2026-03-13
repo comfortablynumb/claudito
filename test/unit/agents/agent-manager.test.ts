@@ -2939,4 +2939,156 @@ describe('DefaultAgentManager', () => {
       expect(agentManager.getQueuedMessageCount('test-project')).toBe(3);
     });
   });
+
+  describe('approvePlan', () => {
+    it('should do nothing when no pending plan exists', async () => {
+      await agentManager.approvePlan('test-project', 'yes');
+      // No error thrown, no side effects
+    });
+
+    it('should approve plan with "yes" - stops agent and restarts in acceptEdits mode', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+
+      // Trigger exitPlanMode to create a pending plan
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('exitPlanMode', 'The implementation plan');
+
+      expect(agentManager.hasPendingPlan('test-project')).toBe(true);
+
+      // Approve the plan
+      await agentManager.approvePlan('test-project', 'yes');
+
+      expect(agentManager.hasPendingPlan('test-project')).toBe(false);
+      // Agent factory should have been called again for restart
+      expect(mockAgentFactory.create).toHaveBeenCalledTimes(2);
+    });
+
+    it('should reject plan with "no" - sends "no" to agent', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('exitPlanMode', 'The plan');
+
+      await agentManager.approvePlan('test-project', 'no');
+
+      expect(agentManager.hasPendingPlan('test-project')).toBe(false);
+      expect(mockAgent.sendInput).toHaveBeenCalledWith('no');
+    });
+
+    it('should send custom feedback when response is not yes/no', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('exitPlanMode', 'The plan');
+
+      await agentManager.approvePlan('test-project', 'Please also add logging');
+
+      expect(agentManager.hasPendingPlan('test-project')).toBe(false);
+      expect(mockAgent.sendInput).toHaveBeenCalledWith('Please also add logging');
+    });
+  });
+
+  describe('restartProjectAgent', () => {
+    it('should warn and return when agent is not running', async () => {
+      // No agent started - nothing to restart
+      await agentManager.restartProjectAgent('test-project');
+      // Should not throw, just log warning
+    });
+
+    it('should restart interactive agent with same session', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+
+      // Restart the agent
+      await agentManager.restartProjectAgent('test-project');
+
+      // Should have been created twice (initial + restart)
+      expect(mockAgentFactory.create).toHaveBeenCalledTimes(2);
+    });
+
+    it('should restart autonomous agent by regenerating roadmap instructions', async () => {
+      // Mock fs.promises for roadmap reading
+      const mockFsAccess = jest.spyOn(require('fs').promises, 'access').mockResolvedValue(undefined);
+      const mockFsReadFile = jest.spyOn(require('fs').promises, 'readFile').mockResolvedValue('# Roadmap\n## Phase 1');
+
+      // Start an agent and set it to autonomous mode
+      await agentManager.startInteractiveAgent('test-project');
+      const agent = mockAgent as unknown as { _setMode: (m: string) => void };
+      agent._setMode('autonomous');
+
+      await agentManager.restartProjectAgent('test-project');
+
+      expect(mockRoadmapParser.parse).toHaveBeenCalled();
+      expect(mockInstructionGenerator.generate).toHaveBeenCalled();
+
+      mockFsAccess.mockRestore();
+      mockFsReadFile.mockRestore();
+    });
+
+    it('should warn when autonomous agent has no roadmap', async () => {
+      const mockFsAccess = jest.spyOn(require('fs').promises, 'access').mockRejectedValue(new Error('ENOENT'));
+
+      await agentManager.startInteractiveAgent('test-project');
+      const agent = mockAgent as unknown as { _setMode: (m: string) => void };
+      agent._setMode('autonomous');
+
+      await agentManager.restartProjectAgent('test-project');
+
+      // Should not throw, just log warning
+      mockFsAccess.mockRestore();
+    });
+
+    it('should throw when project not found during autonomous restart', async () => {
+      const mockFsAccess = jest.spyOn(require('fs').promises, 'access').mockResolvedValue(undefined);
+
+      await agentManager.startInteractiveAgent('test-project');
+      const agent = mockAgent as unknown as { _setMode: (m: string) => void };
+      agent._setMode('autonomous');
+
+      // Make project not found after stop
+      mockProjectRepo.findById.mockResolvedValueOnce(null);
+
+      await expect(agentManager.restartProjectAgent('test-project')).rejects.toThrow('Project not found');
+
+      mockFsAccess.mockRestore();
+    });
+  });
+
+  describe('startOneOffAgent command history recording', () => {
+    it('should record command history when agent has lastCommand', async () => {
+      const mockOneOffAgent = createMockAgent('test-project');
+      Object.defineProperty(mockOneOffAgent, 'lastCommand', {
+        get: () => 'claude --print "test prompt"',
+      });
+      mockAgentFactory.create.mockReturnValue(mockOneOffAgent);
+
+      const oneOffId = await agentManager.startOneOffAgent({
+        projectId: 'test-project',
+        message: 'Test message',
+        label: 'Test Task',
+      });
+
+      expect(oneOffId).toMatch(/^oneoff-/);
+      expect(mockOneOffAgent.start).toHaveBeenCalledWith('Test message');
+    });
+
+    it('should not record command history when agent has no lastCommand', async () => {
+      // Default mock agent has lastCommand = null
+      const oneOffId = await agentManager.startOneOffAgent({
+        projectId: 'test-project',
+        message: 'Test message',
+      });
+
+      expect(oneOffId).toMatch(/^oneoff-/);
+    });
+
+    it('should throw when project not found', async () => {
+      await expect(
+        agentManager.startOneOffAgent({
+          projectId: 'non-existent',
+          message: 'Test',
+        })
+      ).rejects.toThrow('Project not found');
+    });
+  });
+
 });
