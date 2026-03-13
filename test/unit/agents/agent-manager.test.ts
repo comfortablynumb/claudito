@@ -3091,4 +3091,282 @@ describe('DefaultAgentManager', () => {
     });
   });
 
+  describe('startAutonomousLoop', () => {
+    it('should throw when project not found', async () => {
+      await expect(agentManager.startAutonomousLoop('non-existent'))
+        .rejects.toThrow('Project not found');
+    });
+
+    it('should do nothing when roadmap has no pending milestones', async () => {
+      // Mock fs to return a roadmap with all tasks completed
+      const mockFsReadFile = jest.spyOn(require('fs').promises, 'readFile')
+        .mockResolvedValue('# Roadmap');
+      const allCompletedRoadmap = {
+        phases: [{
+          id: 'phase-1',
+          title: 'Phase 1',
+          milestones: [{
+            id: 'ms-1',
+            title: 'Done',
+            tasks: [{ title: 'Task 1', completed: true }],
+            completedCount: 1,
+            totalCount: 1,
+          }],
+        }],
+        currentPhase: 'phase-1',
+        currentMilestone: 'ms-1',
+        overallProgress: 100,
+      };
+      mockRoadmapParser.parse.mockReturnValue(allCompletedRoadmap);
+
+      await agentManager.startAutonomousLoop('test-project');
+
+      // No agent should have been created since there are no pending milestones
+      expect(mockAgentFactory.create).not.toHaveBeenCalled();
+
+      mockFsReadFile.mockRestore();
+    });
+
+    it('should start agent for first pending milestone', async () => {
+      const mockFsReadFile = jest.spyOn(require('fs').promises, 'readFile')
+        .mockResolvedValue('# Roadmap');
+
+      // sampleParsedRoadmap has Task 2 as incomplete
+      await agentManager.startAutonomousLoop('test-project');
+
+      // Should have created a conversation and started an agent
+      expect(mockConversationRepo.create).toHaveBeenCalledWith('test-project', null);
+      expect(mockAgentFactory.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: 'test-project',
+          mode: 'autonomous',
+        })
+      );
+      expect(mockAgent.start).toHaveBeenCalled();
+
+      mockFsReadFile.mockRestore();
+    });
+
+    it('should do nothing when roadmap file does not exist', async () => {
+      const mockFsReadFile = jest.spyOn(require('fs').promises, 'readFile')
+        .mockRejectedValue(new Error('ENOENT'));
+
+      await agentManager.startAutonomousLoop('test-project');
+
+      // No agent should be started when roadmap is missing
+      expect(mockAgentFactory.create).not.toHaveBeenCalled();
+
+      mockFsReadFile.mockRestore();
+    });
+  });
+
+  describe('stopAutonomousLoop', () => {
+    it('should stop the loop for a project', async () => {
+      const mockFsReadFile = jest.spyOn(require('fs').promises, 'readFile')
+        .mockResolvedValue('# Roadmap');
+
+      await agentManager.startAutonomousLoop('test-project');
+      agentManager.stopAutonomousLoop('test-project');
+
+      const loopState = agentManager.getLoopState('test-project');
+      expect(loopState).toBeNull();
+
+      mockFsReadFile.mockRestore();
+    });
+
+    it('should be a no-op when no loop is running', () => {
+      // Should not throw
+      agentManager.stopAutonomousLoop('test-project');
+    });
+  });
+
+  describe('processQueue via agent exit', () => {
+    it('should dequeue and start next agent when one exits', async () => {
+      // Fill up to max concurrent (3), then queue a 4th
+      const project2 = createTestProject({ id: 'project-2', path: '/test/path2' });
+      const project3 = createTestProject({ id: 'project-3', path: '/test/path3' });
+      const project4 = createTestProject({ id: 'project-4', path: '/test/path4' });
+      mockProjectRepo.findById.mockImplementation(async (id: string) => {
+        const map: Record<string, ReturnType<typeof createTestProject>> = {
+          'test-project': testProject,
+          'project-2': project2,
+          'project-3': project3,
+          'project-4': project4,
+        };
+        return map[id] || null;
+      });
+
+      // Start 3 agents (max concurrent)
+      const agents: jest.Mocked<Agent>[] = [];
+      for (const pid of ['test-project', 'project-2', 'project-3']) {
+        const proj = { 'test-project': testProject, 'project-2': project2, 'project-3': project3 }[pid]!;
+        // Set currentConversationId so startAgentImmediately works
+        proj.currentConversationId = 'conv-' + pid;
+
+        const agent = createMockAgent(pid);
+        agents.push(agent);
+        mockAgentFactory.create.mockReturnValueOnce(agent);
+        await agentManager.startAgent(pid, 'Do work');
+      }
+
+      // 4th should be queued
+      project4.currentConversationId = 'conv-project-4';
+      await agentManager.startAgent('project-4', 'Queued work');
+      expect(agentManager.getResourceStatus().queuedCount).toBe(1);
+
+      // Now simulate agent exit for first project → should dequeue project-4
+      const agent4 = createMockAgent('project-4');
+      mockAgentFactory.create.mockReturnValueOnce(agent4);
+
+      // Trigger exit on first agent
+      const exitCall = agents[0]!.on.mock.calls.find(
+        (call: unknown[]) => call[0] === 'exit'
+      );
+      expect(exitCall).toBeDefined();
+      const exitCallback = exitCall![1] as (code: number | null) => void;
+
+      await exitCallback(0);
+
+      // Give async processQueue a tick
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      // project-4 should now have been started
+      expect(agentManager.getResourceStatus().queuedCount).toBe(0);
+    });
+  });
+
+  describe('startAgentImmediately MCP and Docker paths', () => {
+    beforeEach(async () => {
+      // Must set via repository so internal map is updated
+      await mockProjectRepo.setCurrentConversation('test-project', 'conv-123');
+    });
+
+    afterEach(async () => {
+      await mockProjectRepo.setCurrentConversation('test-project', null);
+    });
+
+    it('should pass MCP servers when enabled globally and per-project', async () => {
+      const mcpServer = { id: 'mcp-1', name: 'Test MCP', enabled: true, url: 'http://localhost:3001' };
+      mockSettingsRepo.get.mockResolvedValue({
+        claudePermissions: {
+          dangerouslySkipPermissions: false,
+          defaultMode: 'acceptEdits' as const,
+          allowRules: [],
+          denyRules: [],
+        },
+        mcp: { enabled: true, servers: [mcpServer] },
+        chromeEnabled: false,
+      } as any);
+
+      await mockProjectRepo.updateMcpOverrides('test-project', {
+        enabled: true,
+        serverOverrides: { 'mcp-1': { enabled: true } },
+      });
+
+      await agentManager.startAgent('test-project', 'Do work');
+
+      expect(mockAgentFactory.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mcpServers: [expect.objectContaining({ id: 'mcp-1' })],
+        })
+      );
+    });
+
+    it('should return empty MCP servers when project has no overrides', async () => {
+      const mcpServer = { id: 'mcp-1', name: 'Test MCP', enabled: true, url: 'http://localhost:3001' };
+      mockSettingsRepo.get.mockResolvedValue({
+        claudePermissions: {
+          dangerouslySkipPermissions: false,
+          defaultMode: 'acceptEdits' as const,
+          allowRules: [],
+          denyRules: [],
+        },
+        mcp: { enabled: true, servers: [mcpServer] },
+        chromeEnabled: false,
+      } as any);
+
+      await agentManager.startAgent('test-project', 'Do work');
+
+      expect(mockAgentFactory.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mcpServers: [],
+        })
+      );
+    });
+
+    it('should emit dockerFallbackWarning when Docker fails', async () => {
+      const mockContainerManager = createMockContainerManager();
+      mockContainerManager.ensureContainer.mockRejectedValue(new Error('Docker not running'));
+
+      const managerWithDocker = new DefaultAgentManager({
+        maxConcurrentAgents: 3,
+        agentFactory: mockAgentFactory,
+        projectRepository: mockProjectRepo,
+        conversationRepository: mockConversationRepo,
+        instructionGenerator: mockInstructionGenerator,
+        roadmapParser: mockRoadmapParser,
+        permissionGenerator: mockPermissionGenerator,
+        settingsRepository: mockSettingsRepo,
+        containerManager: mockContainerManager,
+      });
+
+      mockSettingsRepo.get.mockResolvedValue({
+        claudePermissions: {
+          dangerouslySkipPermissions: false,
+          defaultMode: 'acceptEdits' as const,
+          allowRules: [],
+          denyRules: [],
+        },
+        docker: { enabled: true },
+        chromeEnabled: false,
+      } as any);
+
+      const fallbackListener = jest.fn();
+      managerWithDocker.on('dockerFallbackWarning', fallbackListener);
+
+      await managerWithDocker.startAgent('test-project', 'Do work');
+
+      expect(fallbackListener).toHaveBeenCalledWith('test-project', 'Docker not running');
+
+      await managerWithDocker.stopAllAgents();
+    });
+
+    it('should skip permissions when dangerouslySkipPermissions is true', async () => {
+      mockSettingsRepo.get.mockResolvedValue({
+        claudePermissions: {
+          dangerouslySkipPermissions: true,
+          defaultMode: 'acceptEdits' as const,
+          allowRules: [],
+          denyRules: [],
+        },
+        chromeEnabled: false,
+      } as any);
+      mockPermissionGenerator.generateArgs.mockReturnValue({
+        allowedTools: ['Read'],
+        disallowedTools: [],
+        permissionMode: 'acceptEdits' as const,
+        skipPermissions: true,
+      });
+
+      await agentManager.startAgent('test-project', 'Do work');
+
+      expect(mockAgentFactory.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          permissions: expect.objectContaining({
+            skipPermissions: true,
+            allowedTools: [],
+            disallowedTools: [],
+          }),
+        })
+      );
+    });
+
+    it('should throw when no current conversation', async () => {
+      await mockProjectRepo.setCurrentConversation('test-project', null);
+
+      await expect(agentManager.startAgent('test-project', 'Do work'))
+        .rejects.toThrow('No current conversation for project');
+    });
+  });
+
 });
