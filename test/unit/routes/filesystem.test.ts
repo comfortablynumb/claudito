@@ -609,4 +609,128 @@ describe('FilesystemRouter', () => {
       expect(response.body).toEqual({ error: 'Failed to create folder' });
     });
   });
+
+  describe('PUT /fs/move', () => {
+    it('should move a file successfully', async () => {
+      mockFsPromises.stat.mockImplementation((p: string) => {
+        if (p === '/project/old.ts') return Promise.resolve({ isDirectory: () => false });
+        return Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+      });
+      mockFsPromises.rename = jest.fn().mockResolvedValue(undefined);
+
+      const response = await request(app)
+        .put('/fs/move')
+        .send({ sourcePath: '/project/old.ts', targetPath: '/project/new.ts' });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ success: true });
+      expect(mockFsPromises.rename).toHaveBeenCalledWith('/project/old.ts', '/project/new.ts');
+    });
+
+    it('should return 400 when sourcePath is missing', async () => {
+      const response = await request(app)
+        .put('/fs/move')
+        .send({ targetPath: '/project/new.ts' });
+
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual({ error: 'sourcePath and targetPath are required' });
+    });
+
+    it('should return 400 when targetPath is missing', async () => {
+      const response = await request(app)
+        .put('/fs/move')
+        .send({ sourcePath: '/project/old.ts' });
+
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual({ error: 'sourcePath and targetPath are required' });
+    });
+
+    it('should return 404 when source does not exist', async () => {
+      mockFsPromises.stat.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+
+      const response = await request(app)
+        .put('/fs/move')
+        .send({ sourcePath: '/nonexistent/file.ts', targetPath: '/project/new.ts' });
+
+      expect(response.status).toBe(404);
+      expect(response.body).toEqual({ error: 'Source file or directory not found' });
+    });
+
+    it('should return 409 when target already exists', async () => {
+      mockFsPromises.stat.mockResolvedValue({ isDirectory: () => false });
+
+      const response = await request(app)
+        .put('/fs/move')
+        .send({ sourcePath: '/project/old.ts', targetPath: '/project/existing.ts' });
+
+      expect(response.status).toBe(409);
+      expect(response.body).toEqual({ error: 'Target already exists' });
+    });
+
+    it('should return 404 on ENOENT rename error', async () => {
+      mockFsPromises.stat.mockImplementation((p: string) => {
+        if (p === '/project/old.ts') return Promise.resolve({ isDirectory: () => false });
+        return Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+      });
+      mockFsPromises.rename = jest.fn().mockRejectedValue(
+        Object.assign(new Error('ENOENT'), { code: 'ENOENT' })
+      );
+
+      const response = await request(app)
+        .put('/fs/move')
+        .send({ sourcePath: '/project/old.ts', targetPath: '/project/new.ts' });
+
+      expect(response.status).toBe(404);
+    });
+
+    it('should return 409 on EEXIST rename error', async () => {
+      mockFsPromises.stat.mockImplementation((p: string) => {
+        if (p === '/project/old.ts') return Promise.resolve({ isDirectory: () => false });
+        return Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+      });
+      mockFsPromises.rename = jest.fn().mockRejectedValue(
+        Object.assign(new Error('EEXIST'), { code: 'EEXIST' })
+      );
+
+      const response = await request(app)
+        .put('/fs/move')
+        .send({ sourcePath: '/project/old.ts', targetPath: '/project/new.ts' });
+
+      expect(response.status).toBe(409);
+    });
+
+    it('should return 400 on EXDEV cross-device rename error', async () => {
+      mockFsPromises.stat.mockImplementation((p: string) => {
+        if (p === '/project/old.ts') return Promise.resolve({ isDirectory: () => false });
+        return Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+      });
+      mockFsPromises.rename = jest.fn().mockRejectedValue(
+        Object.assign(new Error('EXDEV'), { code: 'EXDEV' })
+      );
+
+      const response = await request(app)
+        .put('/fs/move')
+        .send({ sourcePath: '/project/old.ts', targetPath: '/other-drive/new.ts' });
+
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual({ error: 'Cannot move across different drives' });
+    });
+
+    it('should return 500 on unknown rename error', async () => {
+      mockFsPromises.stat.mockImplementation((p: string) => {
+        if (p === '/project/old.ts') return Promise.resolve({ isDirectory: () => false });
+        return Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+      });
+      mockFsPromises.rename = jest.fn().mockRejectedValue(
+        Object.assign(new Error('Something else'), { code: 'EPERM' })
+      );
+
+      const response = await request(app)
+        .put('/fs/move')
+        .send({ sourcePath: '/project/old.ts', targetPath: '/project/new.ts' });
+
+      expect(response.status).toBe(500);
+      expect(response.body).toEqual({ error: 'Something else' });
+    });
+  });
 });
