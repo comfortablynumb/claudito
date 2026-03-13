@@ -510,6 +510,327 @@ describe('SlackCommandService slash commands — list', () => {
 });
 
 // ============================================================================
+// Tests: /claudito slash commands — help, start, stop, unknown
+// ============================================================================
+
+describe('SlackCommandService slash commands — help/start/stop/unknown', () => {
+  function createSlashSetup(projects: ProjectStatus[] = [sampleProject]) {
+    const agentManager = createMockAgentManager();
+    const slackService = createMockSlackService();
+    const socketService = createMockSocketService();
+    const projectRepository = createMockProjectRepository(projects);
+    const settingsRepository = createMockSettingsRepository({
+      slack: { enabled: true, botToken: 'xoxb-test', appToken: '', defaultChannelId: '' },
+    });
+    const threadTracker = createMockTracker();
+
+    const service = new DefaultSlackCommandService({
+      agentManager,
+      slackService,
+      slackSocketService: socketService,
+      projectRepository,
+      settingsRepository,
+      threadTracker,
+    } as SlackCommandServiceDeps);
+    service.register();
+
+    const handler = (socketService.onSlashCommand as jest.Mock).mock.calls[0][0] as
+      (body: SlashCommandBody, ack: () => Promise<void>) => Promise<void>;
+
+    return { agentManager, slackService, handler };
+  }
+
+  const makeBody = (text: string): SlashCommandBody => ({
+    command: '/claudito',
+    text,
+    user_id: 'U1',
+    channel_id: 'C1',
+    response_url: '',
+  });
+
+  it('shows help for empty command', async () => {
+    const { slackService, handler } = createSlashSetup();
+    await handler(makeBody(''), ack);
+    const reply = (slackService.sendMessage.mock.calls[0] as string[])[2];
+    expect(reply).toContain('Available commands');
+  });
+
+  it('shows help for "help" command', async () => {
+    const { slackService, handler } = createSlashSetup();
+    await handler(makeBody('help'), ack);
+    const reply = (slackService.sendMessage.mock.calls[0] as string[])[2];
+    expect(reply).toContain('Available commands');
+  });
+
+  it('shows unknown command text', async () => {
+    const { slackService, handler } = createSlashSetup();
+    await handler(makeBody('foobar'), ack);
+    const reply = (slackService.sendMessage.mock.calls[0] as string[])[2];
+    expect(reply).toContain('Unknown command');
+    expect(reply).toContain('foobar');
+  });
+
+  it('start command with missing args shows usage', async () => {
+    const { slackService, handler } = createSlashSetup();
+    await handler(makeBody('start'), ack);
+    const reply = (slackService.sendMessage.mock.calls[0] as string[])[2];
+    expect(reply).toContain('Usage');
+  });
+
+  it('start command with only project name (no prompt) shows usage', async () => {
+    const { slackService, handler } = createSlashSetup();
+    await handler(makeBody('start my-project'), ack);
+    const reply = (slackService.sendMessage.mock.calls[0] as string[])[2];
+    expect(reply).toContain('Usage');
+  });
+
+  it('start command with unknown project shows error', async () => {
+    const { slackService, handler } = createSlashSetup();
+    await handler(makeBody('start nonexistent do something'), ack);
+    const reply = (slackService.sendMessage.mock.calls[0] as string[])[2];
+    expect(reply).toContain('Project not found');
+  });
+
+  it('start command starts agent successfully', async () => {
+    const { agentManager, slackService, handler } = createSlashSetup();
+    await handler(makeBody(`start ${sampleProject.id} fix the bug`), ack);
+    expect(agentManager.startInteractiveAgent).toHaveBeenCalledWith(
+      sampleProject.id,
+      expect.objectContaining({ initialMessage: 'fix the bug' }),
+    );
+    const reply = (slackService.sendMessage.mock.calls[0] as string[])[2];
+    expect(reply).toContain('Agent started');
+  });
+
+  it('start command reports error when agent fails to start', async () => {
+    const { agentManager, slackService, handler } = createSlashSetup();
+    agentManager.startInteractiveAgent.mockRejectedValue(new Error('already running'));
+    await handler(makeBody(`start ${sampleProject.id} do stuff`), ack);
+    const reply = (slackService.sendMessage.mock.calls[0] as string[])[2];
+    expect(reply).toContain('Failed to start agent');
+  });
+
+  it('stop command with no args shows usage', async () => {
+    const { slackService, handler } = createSlashSetup();
+    await handler(makeBody('stop'), ack);
+    const reply = (slackService.sendMessage.mock.calls[0] as string[])[2];
+    expect(reply).toContain('Usage');
+  });
+
+  it('stop command with unknown project shows error', async () => {
+    const { slackService, handler } = createSlashSetup();
+    await handler(makeBody('stop nonexistent'), ack);
+    const reply = (slackService.sendMessage.mock.calls[0] as string[])[2];
+    expect(reply).toContain('Project not found');
+  });
+
+  it('stop command stops agent successfully', async () => {
+    const { agentManager, slackService, handler } = createSlashSetup();
+    await handler(makeBody(`stop ${sampleProject.id}`), ack);
+    expect(agentManager.stopAgent).toHaveBeenCalledWith(sampleProject.id);
+    const reply = (slackService.sendMessage.mock.calls[0] as string[])[2];
+    expect(reply).toContain('Agent stopped');
+  });
+
+  it('does nothing when botToken is missing', async () => {
+    const agentManager = createMockAgentManager();
+    const slackService = createMockSlackService();
+    const socketService = createMockSocketService();
+    const projectRepository = createMockProjectRepository([sampleProject]);
+    const settingsRepository = createMockSettingsRepository({});
+    const threadTracker = createMockTracker();
+
+    const service = new DefaultSlackCommandService({
+      agentManager, slackService,
+      slackSocketService: socketService,
+      projectRepository, settingsRepository, threadTracker,
+    } as SlackCommandServiceDeps);
+    service.register();
+
+    const handler = (socketService.onSlashCommand as jest.Mock).mock.calls[0][0] as
+      (body: SlashCommandBody, ack: () => Promise<void>) => Promise<void>;
+
+    await handler(makeBody('help'), ack);
+    expect(slackService.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('start can find project by id', async () => {
+    const { agentManager, handler } = createSlashSetup();
+    await handler(makeBody(`start ${sampleProject.id} fix bug`), ack);
+    expect(agentManager.startInteractiveAgent).toHaveBeenCalledWith(
+      sampleProject.id,
+      expect.objectContaining({ initialMessage: 'fix bug' }),
+    );
+  });
+});
+
+// ============================================================================
+// Tests: interactive actions — stop/approve/reject
+// ============================================================================
+
+describe('SlackCommandService interactive actions — stop/approve/reject', () => {
+  function createInteractiveSetup() {
+    const agentManager = createMockAgentManager();
+    const slackService = createMockSlackService();
+    const socketService = createMockSocketService();
+    const projectRepository = createMockProjectRepository([sampleProject]);
+    const settingsRepository = createMockSettingsRepository({
+      slack: { enabled: true, botToken: 'xoxb-test', appToken: '', defaultChannelId: '' },
+    });
+    const threadTracker = createMockTracker();
+    threadTracker.getLatest.mockReturnValue({ channelId: 'C1', threadTs: 'ts-1' });
+
+    const service = new DefaultSlackCommandService({
+      agentManager, slackService,
+      slackSocketService: socketService,
+      projectRepository, settingsRepository, threadTracker,
+    } as SlackCommandServiceDeps);
+    service.register();
+
+    const handler = (socketService.onInteractiveAction as jest.Mock).mock.calls[0][0] as
+      (body: InteractiveActionBody, ack: () => Promise<void>) => Promise<void>;
+
+    return { agentManager, slackService, handler, threadTracker };
+  }
+
+  it('stop_agent action stops the agent', async () => {
+    const { agentManager, slackService, handler } = createInteractiveSetup();
+    const body = { actions: [{ action_id: `stop_agent:${sampleProject.id}`, value: '' }] } as unknown as InteractiveActionBody;
+    await handler(body, ack);
+    expect(agentManager.stopAgent).toHaveBeenCalledWith(sampleProject.id);
+    expect(slackService.replyInThread).toHaveBeenCalledWith(
+      'xoxb-test', 'C1', 'ts-1', expect.stringContaining('Agent stopped'),
+    );
+  });
+
+  it('approve_plan action sends "yes" input', async () => {
+    const { agentManager, slackService, handler } = createInteractiveSetup();
+    const body = { actions: [{ action_id: `approve_plan:${sampleProject.id}`, value: '' }] } as unknown as InteractiveActionBody;
+    await handler(body, ack);
+    expect(agentManager.sendInput).toHaveBeenCalledWith(sampleProject.id, 'yes');
+    expect(slackService.replyInThread).toHaveBeenCalledWith(
+      'xoxb-test', 'C1', 'ts-1', expect.stringContaining('Plan approved'),
+    );
+  });
+
+  it('reject_plan action sends "no" input', async () => {
+    const { agentManager, slackService, handler } = createInteractiveSetup();
+    const body = { actions: [{ action_id: `reject_plan:${sampleProject.id}`, value: '' }] } as unknown as InteractiveActionBody;
+    await handler(body, ack);
+    expect(agentManager.sendInput).toHaveBeenCalledWith(sampleProject.id, 'no');
+    expect(slackService.replyInThread).toHaveBeenCalledWith(
+      'xoxb-test', 'C1', 'ts-1', expect.stringContaining('Plan rejected'),
+    );
+  });
+
+  it('ignores action with no actions array', async () => {
+    const { agentManager, handler } = createInteractiveSetup();
+    const body = { actions: [] } as unknown as InteractiveActionBody;
+    await handler(body, ack);
+    expect(agentManager.stopAgent).not.toHaveBeenCalled();
+  });
+
+  it('ignores action with missing botToken', async () => {
+    const agentManager = createMockAgentManager();
+    const slackService = createMockSlackService();
+    const socketService = createMockSocketService();
+    const projectRepository = createMockProjectRepository([sampleProject]);
+    const settingsRepository = createMockSettingsRepository({});
+    const threadTracker = createMockTracker();
+
+    const service = new DefaultSlackCommandService({
+      agentManager, slackService,
+      slackSocketService: socketService,
+      projectRepository, settingsRepository, threadTracker,
+    } as SlackCommandServiceDeps);
+    service.register();
+
+    const handler = (socketService.onInteractiveAction as jest.Mock).mock.calls[0][0] as
+      (body: InteractiveActionBody, ack: () => Promise<void>) => Promise<void>;
+
+    const body = { actions: [{ action_id: `stop_agent:${sampleProject.id}`, value: '' }] } as unknown as InteractiveActionBody;
+    await handler(body, ack);
+    expect(agentManager.stopAgent).not.toHaveBeenCalled();
+  });
+
+  it('ignores action with invalid action_id format (no parts)', async () => {
+    const { agentManager, handler } = createInteractiveSetup();
+    const body = { actions: [{ action_id: 'singlepart', value: '' }] } as unknown as InteractiveActionBody;
+    await handler(body, ack);
+    expect(agentManager.stopAgent).not.toHaveBeenCalled();
+  });
+
+  it('select_project action with incomplete value is ignored', async () => {
+    const { agentManager, handler } = createInteractiveSetup();
+    const body = { actions: [{ action_id: 'select_project_0', value: 'onlyone' }] } as unknown as InteractiveActionBody;
+    await handler(body, ack);
+    expect(agentManager.startOneOffAgent).not.toHaveBeenCalled();
+  });
+
+  it('does not reply if threadTracker has no latest for project', async () => {
+    const { slackService, handler, threadTracker } = createInteractiveSetup();
+    threadTracker.getLatest.mockReturnValue(null);
+    const body = { actions: [{ action_id: `stop_agent:${sampleProject.id}`, value: '' }] } as unknown as InteractiveActionBody;
+    await handler(body, ack);
+    expect(slackService.replyInThread).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================================
+// Tests: thread reply edge cases
+// ============================================================================
+
+describe('SlackCommandService — thread reply edge cases', () => {
+  it('drops thread reply when tracked project is not found in repo', async () => {
+    const { deps, getMessageHandler } = createSetup({
+      trackerProjectId: 'deleted-project-id',
+      projects: [],
+    });
+    const handler = getMessageHandler();
+
+    await handler({ type: 'message', text: 'hello', channel: 'C_ANY', thread_ts: 'ts-1' }, ack);
+
+    expect(deps.agentManager.startOneOffAgent).not.toHaveBeenCalled();
+  });
+
+  it('reports error when startOneOffAgent fails for thread reply', async () => {
+    const { deps, getMessageHandler } = createSetup({ trackerProjectId: sampleProject.id });
+    deps.agentManager.startOneOffAgent.mockRejectedValue(new Error('max agents'));
+    deps.slackService.replyInThread.mockResolvedValueOnce('ts-working');
+    const handler = getMessageHandler();
+
+    await handler({ type: 'message', text: 'hello', channel: 'C_ANY', thread_ts: 'ts-1' }, ack);
+
+    expect(deps.slackService.updateMessage).toHaveBeenCalledWith(
+      'xoxb-test', 'C_ANY', 'ts-working',
+      expect.stringContaining('Failed to start agent'),
+    );
+  });
+
+  it('falls back to replyInThread when startOneOffAgent fails and no workingMsgTs', async () => {
+    const { deps, getMessageHandler } = createSetup({ trackerProjectId: sampleProject.id });
+    deps.agentManager.startOneOffAgent.mockRejectedValue(new Error('fail'));
+    deps.slackService.replyInThread.mockResolvedValueOnce(undefined as unknown as string);
+    const handler = getMessageHandler();
+
+    await handler({ type: 'message', text: 'hello', channel: 'C_ANY', thread_ts: 'ts-1' }, ack);
+
+    // Should fall back to replyInThread (called twice: once for working, once for error)
+    expect(deps.slackService.replyInThread).toHaveBeenCalledTimes(2);
+  });
+
+  it('drops message event when eventTs is missing (top-level)', async () => {
+    const { deps, getMessageHandler } = createSetup();
+    const handler = getMessageHandler();
+
+    // Top-level message (no thread_ts) with no ts
+    await handler({ type: 'message', text: 'hello', channel: 'C_ANY' }, ack);
+
+    expect(deps.slackService.replyInThread).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================================
 // Tests: subscribeOneOffToSlack result delivery
 // ============================================================================
 
