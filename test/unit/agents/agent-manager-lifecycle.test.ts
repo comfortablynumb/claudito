@@ -1312,7 +1312,7 @@ describe('AgentManager Lifecycle Tests', () => {
 
       expect(mockAgentFactory.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          model: 'claude-opus-4-6',  // This is the DEFAULT_MODEL from config/models.ts
+          model: 'claude-sonnet-4-6',  // This is the DEFAULT_MODEL from config/models.ts
         })
       );
     });
