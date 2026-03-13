@@ -1440,4 +1440,522 @@ describe('DefaultAgentManager', () => {
       expect(mockAgent.start).toHaveBeenLastCalledWith('Continue');
     });
   });
+
+  describe('one-off agent lifecycle', () => {
+    it('should start a one-off agent and return oneOffId', async () => {
+      const oneOffId = await agentManager.startOneOffAgent({
+        projectId: 'test-project',
+        message: 'Do something',
+      });
+
+      expect(oneOffId).toMatch(/^oneoff-/);
+      expect(mockAgentFactory.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: 'test-project',
+          mode: 'interactive',
+        })
+      );
+      expect(mockAgent.start).toHaveBeenCalledWith('Do something');
+    });
+
+    it('should throw if project not found for one-off agent', async () => {
+      await expect(
+        agentManager.startOneOffAgent({
+          projectId: 'non-existent',
+          message: 'test',
+        })
+      ).rejects.toThrow('Project not found');
+    });
+
+    it('should stop a one-off agent', async () => {
+      const oneOffId = await agentManager.startOneOffAgent({
+        projectId: 'test-project',
+        message: 'Do something',
+      });
+
+      await agentManager.stopOneOffAgent(oneOffId);
+      expect(mockAgent.stop).toHaveBeenCalled();
+
+      // After stopping, status should be null
+      const status = agentManager.getOneOffStatus(oneOffId);
+      expect(status).toBeNull();
+    });
+
+    it('should handle stopping non-existent one-off agent gracefully', async () => {
+      await expect(agentManager.stopOneOffAgent('non-existent')).resolves.toBeUndefined();
+    });
+
+    it('should send input to a one-off agent', async () => {
+      const oneOffId = await agentManager.startOneOffAgent({
+        projectId: 'test-project',
+        message: 'Start',
+      });
+
+      agentManager.sendOneOffInput(oneOffId, 'follow up');
+      expect(mockAgent.sendInput).toHaveBeenCalledWith('follow up');
+    });
+
+    it('should throw when sending input to non-existent one-off agent', () => {
+      expect(() => agentManager.sendOneOffInput('non-existent', 'test')).toThrow(
+        'No one-off agent found'
+      );
+    });
+
+    it('should return status of a one-off agent', async () => {
+      const oneOffId = await agentManager.startOneOffAgent({
+        projectId: 'test-project',
+        message: 'Start',
+      });
+
+      const status = agentManager.getOneOffStatus(oneOffId);
+      expect(status).toBeDefined();
+      expect(status!.status).toBe('running');
+      expect(status!.queued).toBe(false);
+    });
+
+    it('should return null for non-existent one-off status', () => {
+      expect(agentManager.getOneOffStatus('non-existent')).toBeNull();
+    });
+
+    it('should return context usage of a one-off agent', async () => {
+      const oneOffId = await agentManager.startOneOffAgent({
+        projectId: 'test-project',
+        message: 'Start',
+      });
+
+      const ctx = agentManager.getOneOffContextUsage(oneOffId);
+      // mock agent returns null contextUsage by default
+      expect(ctx).toBeNull();
+    });
+
+    it('should return null context usage for non-existent one-off', () => {
+      expect(agentManager.getOneOffContextUsage('non-existent')).toBeNull();
+    });
+
+    it('should check if one-off agent is waiting for input', async () => {
+      const oneOffId = await agentManager.startOneOffAgent({
+        projectId: 'test-project',
+        message: 'Start',
+      });
+
+      const waiting = agentManager.isOneOffWaitingForInput(oneOffId);
+      // mockAgent.isWaitingForInput may be true by default
+      expect(typeof waiting).toBe('boolean');
+    });
+
+    it('should return false for non-existent one-off waiting check', () => {
+      expect(agentManager.isOneOffWaitingForInput('non-existent')).toBe(false);
+    });
+
+    it('should list active one-off agents for a project', async () => {
+      const oneOffId = await agentManager.startOneOffAgent({
+        projectId: 'test-project',
+        message: 'Start',
+        label: 'Test Task',
+      });
+
+      const active = agentManager.getActiveOneOffAgents('test-project');
+      expect(active).toHaveLength(1);
+      expect(active[0]).toEqual(
+        expect.objectContaining({
+          oneOffId,
+          label: 'Test Task',
+          status: 'running',
+        })
+      );
+    });
+
+    it('should return empty array for project with no one-off agents', () => {
+      expect(agentManager.getActiveOneOffAgents('test-project')).toEqual([]);
+    });
+
+    it('should return collected output of a one-off agent', async () => {
+      const oneOffId = await agentManager.startOneOffAgent({
+        projectId: 'test-project',
+        message: 'Start',
+      });
+
+      const output = agentManager.getOneOffCollectedOutput(oneOffId);
+      // mockAgent.collectedOutput defaults to ''
+      expect(output).toBeDefined();
+    });
+
+    it('should return null collected output for non-existent one-off', () => {
+      expect(agentManager.getOneOffCollectedOutput('non-existent')).toBeNull();
+    });
+
+    it('should return one-off meta', async () => {
+      const oneOffId = await agentManager.startOneOffAgent({
+        projectId: 'test-project',
+        message: 'Start',
+        label: 'My Label',
+      });
+
+      const meta = agentManager.getOneOffMeta(oneOffId);
+      expect(meta).toEqual({
+        projectId: 'test-project',
+        label: 'My Label',
+      });
+    });
+
+    it('should return null meta for non-existent one-off', () => {
+      expect(agentManager.getOneOffMeta('non-existent')).toBeNull();
+    });
+
+    it('should use default label when none provided', async () => {
+      const oneOffId = await agentManager.startOneOffAgent({
+        projectId: 'test-project',
+        message: 'Start',
+      });
+
+      const meta = agentManager.getOneOffMeta(oneOffId);
+      expect(meta!.label).toBe('One-off Agent');
+    });
+
+    it('should emit oneOffMessage when one-off agent sends message', async () => {
+      const messageHandler = jest.fn();
+      agentManager.on('oneOffMessage', messageHandler);
+
+      const oneOffId = await agentManager.startOneOffAgent({
+        projectId: 'test-project',
+        message: 'Start',
+      });
+
+      // Trigger a message from the mock agent
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('message', { type: 'stdout', content: 'hello', timestamp: new Date().toISOString() });
+
+      expect(messageHandler).toHaveBeenCalledWith(oneOffId, expect.objectContaining({ type: 'stdout' }));
+    });
+
+    it('should emit oneOffStatus when one-off agent status changes', async () => {
+      const statusHandler = jest.fn();
+      agentManager.on('oneOffStatus', statusHandler);
+
+      await agentManager.startOneOffAgent({
+        projectId: 'test-project',
+        message: 'Start',
+      });
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('status', 'stopped');
+
+      expect(statusHandler).toHaveBeenCalled();
+    });
+
+    it('should emit oneOffWaiting and track version when one-off agent waits', async () => {
+      const waitingHandler = jest.fn();
+      agentManager.on('oneOffWaiting', waitingHandler);
+
+      const oneOffId = await agentManager.startOneOffAgent({
+        projectId: 'test-project',
+        message: 'Start',
+      });
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('waitingForInput', { isWaiting: true, version: 5 });
+
+      expect(waitingHandler).toHaveBeenCalledWith(oneOffId, true, 5);
+    });
+
+    it('should return empty command history for project with no one-offs', () => {
+      expect(agentManager.getOneOffCommandHistory('test-project')).toEqual([]);
+    });
+
+    it('should return empty CLI command history for project', () => {
+      expect(agentManager.getCliCommandHistory('test-project')).toEqual([]);
+    });
+  });
+
+  describe('resolveProfileForProject', () => {
+    it('should use project-specific profile when set', async () => {
+      // Set up a project with an agent profile
+      const projectWithProfile = createTestProject({
+        id: 'profile-project',
+        path: '/test/profile-path',
+        agentProfileId: 'profile-1',
+      });
+      mockProjectRepo = createMockProjectRepository([projectWithProfile]);
+      mockSettingsRepo = createMockSettingsRepository({
+        agentProfiles: [
+          { id: 'profile-1', name: 'Custom', provider: 'anthropic', isDefault: false } as never,
+          { id: 'profile-2', name: 'Default', provider: 'anthropic', isDefault: true } as never,
+        ],
+      });
+
+      agentManager = new DefaultAgentManager({
+        maxConcurrentAgents: 3,
+        agentFactory: mockAgentFactory,
+        projectRepository: mockProjectRepo,
+        conversationRepository: mockConversationRepo,
+        instructionGenerator: mockInstructionGenerator,
+        roadmapParser: mockRoadmapParser,
+        permissionGenerator: mockPermissionGenerator,
+        settingsRepository: mockSettingsRepo,
+      });
+
+      await agentManager.startInteractiveAgent('profile-project');
+
+      expect(mockAgentFactory.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentProfile: expect.objectContaining({ id: 'profile-1' }),
+        })
+      );
+    });
+
+    it('should fall back to default profile when project has no profile', async () => {
+      mockSettingsRepo = createMockSettingsRepository({
+        agentProfiles: [
+          { id: 'p1', name: 'Non-Default', provider: 'anthropic', isDefault: false } as never,
+          { id: 'p2', name: 'Default', provider: 'anthropic', isDefault: true } as never,
+        ],
+      });
+
+      agentManager = new DefaultAgentManager({
+        maxConcurrentAgents: 3,
+        agentFactory: mockAgentFactory,
+        projectRepository: mockProjectRepo,
+        conversationRepository: mockConversationRepo,
+        instructionGenerator: mockInstructionGenerator,
+        roadmapParser: mockRoadmapParser,
+        permissionGenerator: mockPermissionGenerator,
+        settingsRepository: mockSettingsRepo,
+      });
+
+      await agentManager.startInteractiveAgent('test-project');
+
+      expect(mockAgentFactory.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentProfile: expect.objectContaining({ id: 'p2', isDefault: true }),
+        })
+      );
+    });
+  });
+
+  describe('handleAgentExit', () => {
+    it('should clean up agent state on exit', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+
+      // Agent should be running
+      const statusBefore = agentManager.getFullStatus('test-project');
+      expect(statusBefore.status).toBe('running');
+
+      // Trigger exit on mock agent
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('exit', 0);
+
+      // Wait for async handling
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // After exit, getFullStatus should show stopped/not running
+      const statusAfter = agentManager.getFullStatus('test-project');
+      expect(statusAfter.status).toBe('stopped');
+    });
+
+    it('should throw when max concurrent agents reached', async () => {
+      const manager = new DefaultAgentManager({
+        maxConcurrentAgents: 1,
+        agentFactory: mockAgentFactory,
+        projectRepository: createMockProjectRepository([
+          createTestProject({ id: 'proj1', path: '/p1' }),
+          createTestProject({ id: 'proj2', path: '/p2' }),
+        ]),
+        conversationRepository: mockConversationRepo,
+        instructionGenerator: mockInstructionGenerator,
+        roadmapParser: mockRoadmapParser,
+        permissionGenerator: mockPermissionGenerator,
+        settingsRepository: mockSettingsRepo,
+      });
+
+      await manager.startInteractiveAgent('proj1');
+
+      await expect(manager.startInteractiveAgent('proj2')).rejects.toThrow(
+        'Maximum concurrent agents limit'
+      );
+
+      await manager.stopAllAgents();
+    });
+  });
+
+  describe('handleStatusChange', () => {
+    it('should emit status event and update project status on agent status change', async () => {
+      const statusHandler = jest.fn();
+      agentManager.on('status', statusHandler);
+
+      await agentManager.startInteractiveAgent('test-project');
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('status', 'running');
+
+      expect(statusHandler).toHaveBeenCalledWith('test-project', 'running');
+      expect(mockProjectRepo.updateStatus).toHaveBeenCalledWith('test-project', 'running');
+    });
+
+    it('should map error status to project error status', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('status', 'error');
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+      expect(mockProjectRepo.updateStatus).toHaveBeenCalledWith('test-project', 'error');
+    });
+
+    it('should map stopped status to project stopped status', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('status', 'stopped');
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+      expect(mockProjectRepo.updateStatus).toHaveBeenCalledWith('test-project', 'stopped');
+    });
+  });
+
+  describe('handleExitPlanMode', () => {
+    it('should emit plan_mode message when exitPlanMode fires', async () => {
+      const messageHandler = jest.fn();
+      agentManager.on('message', messageHandler);
+
+      await agentManager.startInteractiveAgent('test-project');
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('exitPlanMode', 'This is the plan content');
+
+      expect(messageHandler).toHaveBeenCalledWith(
+        'test-project',
+        expect.objectContaining({
+          type: 'plan_mode',
+          planModeInfo: expect.objectContaining({
+            action: 'exit',
+            planContent: 'This is the plan content',
+          }),
+        })
+      );
+    });
+
+    it('should ignore duplicate exitPlanMode events', async () => {
+      const messageHandler = jest.fn();
+      agentManager.on('message', messageHandler);
+
+      await agentManager.startInteractiveAgent('test-project');
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('exitPlanMode', 'Plan A');
+      agent._emit('exitPlanMode', 'Plan B');
+
+      // Only one plan_mode message should be emitted
+      const planMessages = messageHandler.mock.calls.filter(
+        (call) => call[1]?.type === 'plan_mode'
+      );
+      expect(planMessages).toHaveLength(1);
+    });
+  });
+
+  describe('getRunningProjectIds', () => {
+    it('should return IDs of all running projects', async () => {
+      const multiProjectRepo = createMockProjectRepository([
+        createTestProject({ id: 'proj1', path: '/p1' }),
+        createTestProject({ id: 'proj2', path: '/p2' }),
+      ]);
+      const manager = new DefaultAgentManager({
+        maxConcurrentAgents: 5,
+        agentFactory: mockAgentFactory,
+        projectRepository: multiProjectRepo,
+        conversationRepository: mockConversationRepo,
+        instructionGenerator: mockInstructionGenerator,
+        roadmapParser: mockRoadmapParser,
+        permissionGenerator: mockPermissionGenerator,
+        settingsRepository: mockSettingsRepo,
+      });
+
+      await manager.startInteractiveAgent('proj1');
+      await manager.startInteractiveAgent('proj2');
+
+      const running = manager.getRunningProjectIds();
+      expect(running).toContain('proj1');
+      expect(running).toContain('proj2');
+
+      await manager.stopAllAgents();
+    });
+
+    it('should return empty array when no agents running', () => {
+      expect(agentManager.getRunningProjectIds()).toEqual([]);
+    });
+  });
+
+  describe('restartAllRunningAgents', () => {
+    it('should restart all currently running agents', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+
+      // Clear previous calls
+      mockAgentFactory.create.mockClear();
+      mockAgent.start.mockClear();
+
+      await agentManager.restartAllRunningAgents();
+
+      // Wait for restart to complete
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      // Agent should have been stopped and recreated
+      expect(mockAgent.stop).toHaveBeenCalled();
+    });
+  });
+
+  describe('one-off agent with multimodal content', () => {
+    it('should send multimodal content when images provided', async () => {
+      const oneOffId = await agentManager.startOneOffAgent({
+        projectId: 'test-project',
+        message: 'Start',
+      });
+
+      const images: ImageData[] = [
+        { data: 'base64data', type: 'image/png' },
+      ];
+
+      agentManager.sendOneOffInput(oneOffId, 'look at this', images);
+
+      // Should call sendInput with JSON-serialized multimodal content
+      expect(mockAgent.sendInput).toHaveBeenCalled();
+      const lastCall = mockAgent.sendInput.mock.calls[mockAgent.sendInput.mock.calls.length - 1]!;
+      const sentContent = lastCall[0];
+      // The content is a JSON string containing image and text blocks
+      expect(sentContent).toContain('image/png');
+      expect(sentContent).toContain('look at this');
+    });
+  });
+
+  describe('one-off agent permission modes', () => {
+    it('should apply plan permission mode to one-off agent', async () => {
+      await agentManager.startOneOffAgent({
+        projectId: 'test-project',
+        message: 'Plan something',
+        permissionMode: 'plan',
+      });
+
+      expect(mockAgentFactory.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          permissions: expect.objectContaining({
+            permissionMode: 'plan',
+          }),
+        })
+      );
+    });
+
+    it('should apply appendSystemPrompt to one-off agent', async () => {
+      await agentManager.startOneOffAgent({
+        projectId: 'test-project',
+        message: 'Do it',
+        appendSystemPrompt: 'Custom system prompt',
+      });
+
+      expect(mockAgentFactory.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          permissions: expect.objectContaining({
+            appendSystemPrompt: 'Custom system prompt',
+          }),
+        })
+      );
+    });
+  });
 });
