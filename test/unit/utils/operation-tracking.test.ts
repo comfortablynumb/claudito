@@ -206,5 +206,6 @@ describe('operation-tracking', () => {
 
       expect(manager.size).toBe(0);
     });
+
   });
 });
