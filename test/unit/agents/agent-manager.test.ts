@@ -2735,4 +2735,208 @@ describe('DefaultAgentManager', () => {
       expect(agentManager.getRecentCommands('non-existent')).toEqual([]);
     });
   });
+
+  describe('getResourceStatus', () => {
+    it('should return zero running and queued counts when idle', () => {
+      const status = agentManager.getResourceStatus();
+
+      expect(status.runningCount).toBe(0);
+      expect(status.queuedCount).toBe(0);
+      expect(status.queuedProjects).toEqual([]);
+    });
+
+    it('should reflect running agent count', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+
+      const status = agentManager.getResourceStatus();
+
+      expect(status.runningCount).toBe(1);
+    });
+  });
+
+  describe('removeFromQueue', () => {
+    it('should not throw when removing non-existent project from queue', () => {
+      expect(() => agentManager.removeFromQueue('non-existent')).not.toThrow();
+    });
+  });
+
+  describe('setMaxConcurrentAgents', () => {
+    it('should update max concurrent agents', () => {
+      agentManager.setMaxConcurrentAgents(10);
+
+      const status = agentManager.getResourceStatus();
+
+      expect(status.maxConcurrent).toBe(10);
+    });
+
+    it('should enforce minimum of 1', () => {
+      agentManager.setMaxConcurrentAgents(0);
+
+      const status = agentManager.getResourceStatus();
+
+      expect(status.maxConcurrent).toBe(1);
+    });
+  });
+
+  describe('isRunning', () => {
+    it('should return false for non-existent project', () => {
+      expect(agentManager.isRunning('non-existent')).toBe(false);
+    });
+
+    it('should return true for running agent', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+
+      expect(agentManager.isRunning('test-project')).toBe(true);
+    });
+  });
+
+  describe('isQueued', () => {
+    it('should return false for non-queued project', () => {
+      expect(agentManager.isQueued('non-existent')).toBe(false);
+    });
+  });
+
+  describe('isWaitingForInput', () => {
+    it('should return false for non-existent project', () => {
+      expect(agentManager.isWaitingForInput('non-existent')).toBe(false);
+    });
+
+    it('should reflect agent waiting state', async () => {
+      Object.defineProperty(mockAgent, 'isWaitingForInput', { value: true, writable: true });
+      await agentManager.startInteractiveAgent('test-project');
+
+      expect(agentManager.isWaitingForInput('test-project')).toBe(true);
+    });
+  });
+
+  describe('hasPendingPlan', () => {
+    it('should return false when no plan is pending', () => {
+      expect(agentManager.hasPendingPlan('test-project')).toBe(false);
+    });
+  });
+
+  describe('getWaitingVersion', () => {
+    it('should return 0 for non-existent project', () => {
+      expect(agentManager.getWaitingVersion('non-existent')).toBe(0);
+    });
+  });
+
+  describe('getAgentMode', () => {
+    it('should return null for non-existent project', () => {
+      expect(agentManager.getAgentMode('non-existent')).toBeNull();
+    });
+
+    it('should return agent mode for active project', async () => {
+      Object.defineProperty(mockAgent, 'mode', { value: 'interactive', writable: true });
+      await agentManager.startInteractiveAgent('test-project');
+
+      expect(agentManager.getAgentMode('test-project')).toBe('interactive');
+    });
+  });
+
+  describe('getProcessInfo', () => {
+    it('should return null for non-existent project', () => {
+      expect(agentManager.getProcessInfo('non-existent')).toBeNull();
+    });
+
+    it('should return process info from agent', async () => {
+      const processInfo = { pid: 12345, command: 'claude' };
+      Object.defineProperty(mockAgent, 'processInfo', { value: processInfo, writable: true });
+      await agentManager.startInteractiveAgent('test-project');
+
+      expect(agentManager.getProcessInfo('test-project')).toEqual(processInfo);
+    });
+  });
+
+  describe('getContextUsage', () => {
+    it('should return null for non-existent project', () => {
+      expect(agentManager.getContextUsage('non-existent')).toBeNull();
+    });
+  });
+
+  describe('getRunningProjectIds', () => {
+    it('should return empty array when no agents running', () => {
+      expect(agentManager.getRunningProjectIds()).toEqual([]);
+    });
+
+    it('should return array of running project ids', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+
+      expect(agentManager.getRunningProjectIds()).toEqual(['test-project']);
+    });
+  });
+
+  describe('one-off agent getters', () => {
+    it('getOneOffContextUsage should return null for unknown agent', () => {
+      expect(agentManager.getOneOffContextUsage('unknown')).toBeNull();
+    });
+
+    it('isOneOffWaitingForInput should return false for unknown agent', () => {
+      expect(agentManager.isOneOffWaitingForInput('unknown')).toBe(false);
+    });
+
+    it('getOneOffCollectedOutput should return null for unknown agent', () => {
+      expect(agentManager.getOneOffCollectedOutput('unknown')).toBeNull();
+    });
+
+    it('getOneOffMeta should return null for unknown agent', () => {
+      expect(agentManager.getOneOffMeta('unknown')).toBeNull();
+    });
+
+    it('getActiveOneOffAgents should return empty array for project with no one-offs', () => {
+      expect(agentManager.getActiveOneOffAgents('test-project')).toEqual([]);
+    });
+
+    it('getOneOffCommandHistory should return empty array for project with no history', () => {
+      expect(agentManager.getOneOffCommandHistory('test-project')).toEqual([]);
+    });
+
+    it('getCliCommandHistory should return empty array for project with no history', () => {
+      expect(agentManager.getCliCommandHistory('test-project')).toEqual([]);
+    });
+  });
+
+  describe('stopAllAgents', () => {
+    it('should stop all running agents', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+
+      await agentManager.stopAllAgents();
+
+      expect(mockAgent.stop).toHaveBeenCalled();
+      expect(agentManager.isRunning('test-project')).toBe(false);
+    });
+
+    it('should stop containers when container manager is provided', async () => {
+      const mockContainerManager = createMockContainerManager();
+
+      const managerWithDocker = new DefaultAgentManager({
+        maxConcurrentAgents: 3,
+        agentFactory: mockAgentFactory,
+        projectRepository: mockProjectRepo,
+        conversationRepository: mockConversationRepo,
+        instructionGenerator: mockInstructionGenerator,
+        roadmapParser: mockRoadmapParser,
+        permissionGenerator: mockPermissionGenerator,
+        settingsRepository: mockSettingsRepo,
+        containerManager: mockContainerManager,
+      });
+
+      await managerWithDocker.stopAllAgents();
+
+      expect(mockContainerManager.stopAllContainers).toHaveBeenCalled();
+    });
+  });
+
+  describe('getQueuedMessageCount', () => {
+    it('should return 0 for non-existent project', () => {
+      expect(agentManager.getQueuedMessageCount('non-existent')).toBe(0);
+    });
+
+    it('should return agent queued message count', async () => {
+      Object.defineProperty(mockAgent, 'queuedMessageCount', { value: 3, writable: true });
+      await agentManager.startInteractiveAgent('test-project');
+
+      expect(agentManager.getQueuedMessageCount('test-project')).toBe(3);
+    });
+  });
 });
