@@ -48,6 +48,163 @@ describe('MarkdownRoadmapParser', () => {
       expect(result.phases).toHaveLength(0);
       expect(result.overallProgress).toBe(0);
     });
+
+    it('should identify current phase and milestone', () => {
+      const content = `## Phase 1: Setup
+### Milestone 1.1: Init
+- [x] Done task
+- [ ] Pending task
+`;
+      const result = parser.parse(content);
+
+      expect(result.currentPhase).toBe('phase-1');
+      expect(result.currentMilestone).toBe('milestone-1.1');
+    });
+
+    it('should skip completed milestones when finding current', () => {
+      const content = `## Phase 1: Setup
+### Milestone 1.1: Init
+- [x] Done 1
+- [x] Done 2
+
+### Milestone 1.2: Config
+- [ ] Pending task
+`;
+      const result = parser.parse(content);
+
+      expect(result.currentPhase).toBe('phase-1');
+      expect(result.currentMilestone).toBe('milestone-1.2');
+    });
+
+    it('should return null current when all tasks are complete', () => {
+      const content = `## Phase 1: Setup
+### Milestone 1.1: Init
+- [x] Done 1
+- [x] Done 2
+`;
+      const result = parser.parse(content);
+
+      expect(result.currentPhase).toBeNull();
+      expect(result.currentMilestone).toBeNull();
+      expect(result.overallProgress).toBe(100);
+    });
+
+    it('should handle content before first phase header', () => {
+      const content = `# Project Roadmap
+Some description text here
+
+## Phase 1: Setup
+### Milestone 1.1: Init
+- [ ] Task 1
+`;
+      const result = parser.parse(content);
+
+      expect(result.phases).toHaveLength(1);
+      expect(result.phases[0]!.title).toBe('Phase 1: Setup');
+    });
+
+    it('should handle uppercase X in completed tasks', () => {
+      const content = `## Phase 1: Setup
+### Milestone 1.1: Init
+- [X] Completed task
+- [ ] Pending task
+`;
+      const result = parser.parse(content);
+
+      expect(result.phases[0]!.milestones[0]!.completedCount).toBe(1);
+      expect(result.phases[0]!.milestones[0]!.totalCount).toBe(2);
+    });
+
+    it('should ignore non-task lines', () => {
+      const content = `## Phase 1: Setup
+### Milestone 1.1: Init
+- [x] Done task
+Some random text
+- [ ] Pending task
+`;
+      const result = parser.parse(content);
+
+      expect(result.phases[0]!.milestones[0]!.tasks).toHaveLength(2);
+    });
+
+    it('should handle tasks without a milestone', () => {
+      const content = `## Phase 1: Setup
+- [ ] Orphan task
+### Milestone 1.1: Init
+- [ ] Real task
+`;
+      const result = parser.parse(content);
+
+      // The orphan task should be ignored (no current milestone)
+      expect(result.phases[0]!.milestones).toHaveLength(1);
+      expect(result.phases[0]!.milestones[0]!.tasks).toHaveLength(1);
+    });
+
+    it('should handle milestone without a phase', () => {
+      const content = `### Milestone 1.1: Init
+- [ ] Task 1
+`;
+      const result = parser.parse(content);
+
+      // No phase seen, so milestone is ignored
+      expect(result.phases).toHaveLength(0);
+    });
+  });
+});
+
+describe('MarkdownRoadmapEditor - deleteTask edge cases', () => {
+  let parser: RoadmapParser;
+  let editor: MarkdownRoadmapEditor;
+
+  beforeEach(() => {
+    parser = new MarkdownRoadmapParser();
+    editor = new MarkdownRoadmapEditor(parser);
+  });
+
+  it('should delete the first task', () => {
+    const content = `## Phase 1: Setup
+### Milestone 1.1: Init
+- [x] First task
+- [ ] Second task
+`;
+    const result = editor.deleteTask(content, {
+      phaseId: 'phase-1',
+      milestoneId: 'milestone-1.1',
+      taskIndex: 0,
+    });
+
+    expect(result).not.toContain('First task');
+    expect(result).toContain('Second task');
+  });
+
+  it('should delete the last task', () => {
+    const content = `## Phase 1: Setup
+### Milestone 1.1: Init
+- [x] First task
+- [ ] Second task
+`;
+    const result = editor.deleteTask(content, {
+      phaseId: 'phase-1',
+      milestoneId: 'milestone-1.1',
+      taskIndex: 1,
+    });
+
+    expect(result).toContain('First task');
+    expect(result).not.toContain('Second task');
+  });
+
+  it('should throw for negative task index', () => {
+    const content = `## Phase 1: Setup
+### Milestone 1.1: Init
+- [ ] Task 1
+`;
+    expect(() =>
+      editor.deleteTask(content, {
+        phaseId: 'phase-1',
+        milestoneId: 'milestone-1.1',
+        taskIndex: -1,
+      })
+    ).toThrow('Invalid task index: -1');
   });
 });
 
@@ -280,6 +437,56 @@ describe('MarkdownRoadmapEditor', () => {
           taskTitle: 'Test',
         })
       ).toThrow('Milestone not found: milestone-99.99');
+    });
+
+    it('should add a task to the last milestone at end of content', () => {
+      const result = editor.addTask(sampleRoadmap, {
+        phaseId: 'phase-3',
+        milestoneId: 'milestone-3.1',
+        taskTitle: 'Final cleanup',
+      });
+
+      expect(result).toContain('- [ ] Final cleanup');
+      const lines = result.split('\n');
+      const docIdx = lines.findIndex(l => l.includes('Documentation'));
+      const newIdx = lines.findIndex(l => l.includes('Final cleanup'));
+      expect(newIdx).toBe(docIdx + 1);
+    });
+
+    it('should add task when next milestone header comes before phase end', () => {
+      // Add task to milestone 1.1 which is followed by milestone 1.2
+      const result = editor.addTask(sampleRoadmap, {
+        phaseId: 'phase-1',
+        milestoneId: 'milestone-1.1',
+        taskTitle: 'Between milestones',
+      });
+
+      expect(result).toContain('- [ ] Between milestones');
+      const lines = result.split('\n');
+      const setupIdx = lines.findIndex(l => l.includes('Setup testing'));
+      const newIdx = lines.findIndex(l => l.includes('Between milestones'));
+      expect(newIdx).toBe(setupIdx + 1);
+      // Ensure the task appears before milestone 1.2
+      const milestone12Idx = lines.findIndex(l => l.includes('Milestone 1.2'));
+      expect(newIdx).toBeLessThan(milestone12Idx);
+    });
+
+    it('should add task when next phase header comes', () => {
+      // Add task to milestone 1.2 (last milestone of phase 1, followed by phase 2)
+      const result = editor.addTask(sampleRoadmap, {
+        phaseId: 'phase-1',
+        milestoneId: 'milestone-1.2',
+        taskTitle: 'Phase boundary task',
+      });
+
+      expect(result).toContain('- [ ] Phase boundary task');
+      const lines = result.split('\n');
+      const routingIdx = lines.findIndex(l => l.includes('Setup routing'));
+      const newIdx = lines.findIndex(l => l.includes('Phase boundary task'));
+      expect(newIdx).toBe(routingIdx + 1);
+      // Ensure the task appears before phase 2
+      const phase2Idx = lines.findIndex(l => l.includes('Phase 2: Features'));
+      expect(newIdx).toBeLessThan(phase2Idx);
     });
 
     it('should preserve existing content', () => {
