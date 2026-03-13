@@ -17,6 +17,25 @@ import {
   createTestProject,
 } from '../helpers/mock-factories';
 
+// Mock the autonomous loop orchestrator to control its behavior in tests
+const mockLoopOrchestrator = {
+  on: jest.fn(),
+  startLoop: jest.fn().mockResolvedValue(null),
+  stopLoop: jest.fn(),
+  isLooping: jest.fn().mockReturnValue(false),
+  getLoopState: jest.fn().mockReturnValue(null),
+  getRunningProjectIds: jest.fn().mockReturnValue([]),
+  parseAgentResponse: jest.fn().mockReturnValue(null),
+  handleMilestoneComplete: jest.fn().mockResolvedValue(null),
+  handleMilestoneFailed: jest.fn(),
+  generateMilestoneInstructions: jest.fn().mockReturnValue('instructions'),
+  setCurrentMilestone: jest.fn(),
+};
+
+jest.mock('../../../src/agents/autonomous-loop-orchestrator', () => ({
+  AutonomousLoopOrchestrator: jest.fn().mockImplementation(() => mockLoopOrchestrator),
+}));
+
 // Mock the utils module to provide getPidTracker
 jest.mock('../../../src/utils', () => {
   const originalModule = jest.requireActual('../../../src/utils');
@@ -51,6 +70,23 @@ describe('DefaultAgentManager', () => {
   const testProject = createTestProject({ id: 'test-project', path: '/test/path' });
 
   beforeEach(() => {
+    // Reset loop orchestrator mocks
+    Object.values(mockLoopOrchestrator).forEach(fn => {
+      if (typeof fn === 'function' && 'mockReset' in fn) {
+        (fn as jest.Mock).mockReset();
+      }
+    });
+    mockLoopOrchestrator.on.mockReturnValue(undefined);
+    mockLoopOrchestrator.startLoop.mockResolvedValue(null);
+    mockLoopOrchestrator.isLooping.mockReturnValue(false);
+    mockLoopOrchestrator.getLoopState.mockReturnValue(null);
+    mockLoopOrchestrator.getRunningProjectIds.mockReturnValue([]);
+    mockLoopOrchestrator.parseAgentResponse.mockReturnValue(null);
+    mockLoopOrchestrator.handleMilestoneComplete.mockResolvedValue(null);
+    mockLoopOrchestrator.handleMilestoneFailed.mockReturnValue(undefined);
+    mockLoopOrchestrator.generateMilestoneInstructions.mockReturnValue('instructions');
+    mockLoopOrchestrator.setCurrentMilestone.mockReturnValue(undefined);
+
     mockAgent = createMockAgent('test-project');
     mockAgentFactory = createMockAgentFactory(mockAgent);
     mockProjectRepo = createMockProjectRepository([testProject]);
@@ -3098,40 +3134,25 @@ describe('DefaultAgentManager', () => {
     });
 
     it('should do nothing when roadmap has no pending milestones', async () => {
-      // Mock fs to return a roadmap with all tasks completed
-      const mockFsReadFile = jest.spyOn(require('fs').promises, 'readFile')
-        .mockResolvedValue('# Roadmap');
-      const allCompletedRoadmap = {
-        phases: [{
-          id: 'phase-1',
-          title: 'Phase 1',
-          milestones: [{
-            id: 'ms-1',
-            title: 'Done',
-            tasks: [{ title: 'Task 1', completed: true }],
-            completedCount: 1,
-            totalCount: 1,
-          }],
-        }],
-        currentPhase: 'phase-1',
-        currentMilestone: 'ms-1',
-        overallProgress: 100,
-      };
-      mockRoadmapParser.parse.mockReturnValue(allCompletedRoadmap);
+      // startLoop returns null when no pending milestones
+      mockLoopOrchestrator.startLoop.mockResolvedValue(null);
 
       await agentManager.startAutonomousLoop('test-project');
 
       // No agent should have been created since there are no pending milestones
       expect(mockAgentFactory.create).not.toHaveBeenCalled();
-
-      mockFsReadFile.mockRestore();
     });
 
     it('should start agent for first pending milestone', async () => {
-      const mockFsReadFile = jest.spyOn(require('fs').promises, 'readFile')
-        .mockResolvedValue('# Roadmap');
+      const pendingMilestone = {
+        phaseId: 'phase-1',
+        phaseTitle: 'Phase 1',
+        milestoneId: 'ms-1',
+        milestoneTitle: 'First Milestone',
+        pendingTasks: ['Task 2'],
+      };
+      mockLoopOrchestrator.startLoop.mockResolvedValue(pendingMilestone);
 
-      // sampleParsedRoadmap has Task 2 as incomplete
       await agentManager.startAutonomousLoop('test-project');
 
       // Should have created a conversation and started an agent
@@ -3143,35 +3164,25 @@ describe('DefaultAgentManager', () => {
         })
       );
       expect(mockAgent.start).toHaveBeenCalled();
-
-      mockFsReadFile.mockRestore();
     });
 
     it('should do nothing when roadmap file does not exist', async () => {
-      const mockFsReadFile = jest.spyOn(require('fs').promises, 'readFile')
-        .mockRejectedValue(new Error('ENOENT'));
+      // startLoop returns null when no roadmap found
+      mockLoopOrchestrator.startLoop.mockResolvedValue(null);
 
       await agentManager.startAutonomousLoop('test-project');
 
       // No agent should be started when roadmap is missing
       expect(mockAgentFactory.create).not.toHaveBeenCalled();
-
-      mockFsReadFile.mockRestore();
     });
   });
 
   describe('stopAutonomousLoop', () => {
     it('should stop the loop for a project', async () => {
-      const mockFsReadFile = jest.spyOn(require('fs').promises, 'readFile')
-        .mockResolvedValue('# Roadmap');
-
       await agentManager.startAutonomousLoop('test-project');
       agentManager.stopAutonomousLoop('test-project');
 
-      const loopState = agentManager.getLoopState('test-project');
-      expect(loopState).toBeNull();
-
-      mockFsReadFile.mockRestore();
+      expect(mockLoopOrchestrator.stopLoop).toHaveBeenCalledWith('test-project');
     });
 
     it('should be a no-op when no loop is running', () => {
@@ -3366,6 +3377,277 @@ describe('DefaultAgentManager', () => {
 
       await expect(agentManager.startAgent('test-project', 'Do work'))
         .rejects.toThrow('No current conversation for project');
+    });
+  });
+
+  describe('handleAgentCompletionResponse via autonomous message', () => {
+    const testMilestone: { phaseId: string; phaseTitle: string; milestoneId: string; milestoneTitle: string; pendingTasks: string[] } = {
+      phaseId: 'phase-1',
+      phaseTitle: 'Phase 1',
+      milestoneId: 'milestone-1',
+      milestoneTitle: 'First Milestone',
+      pendingTasks: ['task-1'],
+    };
+
+    const nextMilestone: { phaseId: string; phaseTitle: string; milestoneId: string; milestoneTitle: string; pendingTasks: string[] } = {
+      phaseId: 'phase-1',
+      phaseTitle: 'Phase 1',
+      milestoneId: 'milestone-2',
+      milestoneTitle: 'Second Milestone',
+      pendingTasks: ['task-2'],
+    };
+
+    it('should return early when project not found', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+      Object.defineProperty(mockAgent, 'mode', { value: 'autonomous', writable: true, configurable: true });
+
+      // parseAgentResponse returns a COMPLETE response
+      mockLoopOrchestrator.parseAgentResponse.mockReturnValue({
+        status: 'COMPLETE',
+        reason: 'Done',
+      });
+
+      // But findById returns null for this call (simulate project deleted)
+      mockProjectRepo.findById = jest.fn().mockResolvedValue(null);
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('message', {
+        type: 'stdout',
+        content: 'MILESTONE COMPLETE: Done',
+        timestamp: new Date().toISOString(),
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // handleMilestoneComplete should NOT be called since project was not found
+      expect(mockLoopOrchestrator.handleMilestoneComplete).not.toHaveBeenCalled();
+    });
+
+    it('should return early when no current milestone in loop state', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+      Object.defineProperty(mockAgent, 'mode', { value: 'autonomous', writable: true, configurable: true });
+
+      mockLoopOrchestrator.parseAgentResponse.mockReturnValue({
+        status: 'COMPLETE',
+        reason: 'Done',
+      });
+      mockLoopOrchestrator.getLoopState.mockReturnValue({
+        isLooping: true,
+        currentMilestone: null,
+        currentConversationId: null,
+      });
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('message', {
+        type: 'stdout',
+        content: 'MILESTONE COMPLETE: Done',
+        timestamp: new Date().toISOString(),
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      expect(mockLoopOrchestrator.handleMilestoneComplete).not.toHaveBeenCalled();
+    });
+
+    it('should handle COMPLETE with next milestone (stop and start next)', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+      Object.defineProperty(mockAgent, 'mode', { value: 'autonomous', writable: true, configurable: true });
+
+      mockLoopOrchestrator.parseAgentResponse.mockReturnValue({
+        status: 'COMPLETE',
+        reason: 'All tests passing',
+      });
+      mockLoopOrchestrator.getLoopState.mockReturnValue({
+        isLooping: true,
+        currentMilestone: testMilestone,
+        currentConversationId: 'conv-1',
+      });
+      mockLoopOrchestrator.handleMilestoneComplete.mockResolvedValue(nextMilestone);
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('message', {
+        type: 'stdout',
+        content: 'MILESTONE COMPLETE: All tests passing',
+        timestamp: new Date().toISOString(),
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      expect(mockLoopOrchestrator.handleMilestoneComplete).toHaveBeenCalledWith(
+        'test-project',
+        '/test/path',
+        testMilestone,
+        'All tests passing'
+      );
+    });
+
+    it('should handle COMPLETE with no next milestone (loop done)', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+      Object.defineProperty(mockAgent, 'mode', { value: 'autonomous', writable: true, configurable: true });
+
+      mockLoopOrchestrator.parseAgentResponse.mockReturnValue({
+        status: 'COMPLETE',
+        reason: 'Final milestone done',
+      });
+      mockLoopOrchestrator.getLoopState.mockReturnValue({
+        isLooping: true,
+        currentMilestone: testMilestone,
+        currentConversationId: 'conv-1',
+      });
+      // No next milestone
+      mockLoopOrchestrator.handleMilestoneComplete.mockResolvedValue(null);
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('message', {
+        type: 'stdout',
+        content: 'MILESTONE COMPLETE: Final milestone done',
+        timestamp: new Date().toISOString(),
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      expect(mockLoopOrchestrator.handleMilestoneComplete).toHaveBeenCalledWith(
+        'test-project',
+        '/test/path',
+        testMilestone,
+        'Final milestone done'
+      );
+    });
+
+    it('should handle FAILED response by marking milestone failed and stopping', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+      Object.defineProperty(mockAgent, 'mode', { value: 'autonomous', writable: true, configurable: true });
+
+      mockLoopOrchestrator.parseAgentResponse.mockReturnValue({
+        status: 'FAILED',
+        reason: 'Tests are broken',
+      });
+      mockLoopOrchestrator.getLoopState.mockReturnValue({
+        isLooping: true,
+        currentMilestone: testMilestone,
+        currentConversationId: 'conv-1',
+      });
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('message', {
+        type: 'stdout',
+        content: 'MILESTONE FAILED: Tests are broken',
+        timestamp: new Date().toISOString(),
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      expect(mockLoopOrchestrator.handleMilestoneFailed).toHaveBeenCalledWith(
+        'test-project',
+        testMilestone,
+        'Tests are broken'
+      );
+    });
+
+    it('should handle result message type in autonomous mode', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+      Object.defineProperty(mockAgent, 'mode', { value: 'autonomous', writable: true, configurable: true });
+
+      mockLoopOrchestrator.parseAgentResponse.mockReturnValue({
+        status: 'COMPLETE',
+        reason: 'Done via result',
+      });
+      mockLoopOrchestrator.getLoopState.mockReturnValue({
+        isLooping: true,
+        currentMilestone: testMilestone,
+        currentConversationId: 'conv-1',
+      });
+      mockLoopOrchestrator.handleMilestoneComplete.mockResolvedValue(null);
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('message', {
+        type: 'result',
+        content: 'MILESTONE COMPLETE: Done via result',
+        timestamp: new Date().toISOString(),
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      expect(mockLoopOrchestrator.parseAgentResponse).toHaveBeenCalledWith('MILESTONE COMPLETE: Done via result');
+      expect(mockLoopOrchestrator.handleMilestoneComplete).toHaveBeenCalled();
+    });
+  });
+
+  describe('handleAgentExit autonomous loop failure', () => {
+    it('should call handleMilestoneFailed when autonomous agent exits with active loop and milestone', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+
+      const milestone = {
+        phaseId: 'phase-1',
+        phaseTitle: 'Phase 1',
+        milestoneId: 'ms-1',
+        milestoneTitle: 'Milestone 1',
+        pendingTasks: ['task-1'],
+      };
+
+      Object.defineProperty(mockAgent, 'mode', { value: 'autonomous', writable: true, configurable: true });
+      mockLoopOrchestrator.isLooping.mockReturnValue(true);
+      mockLoopOrchestrator.getLoopState.mockReturnValue({
+        isLooping: true,
+        currentMilestone: milestone,
+        currentConversationId: 'conv-1',
+      });
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('exit', 1);
+
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      expect(mockLoopOrchestrator.handleMilestoneFailed).toHaveBeenCalledWith(
+        'test-project',
+        milestone,
+        'Agent exited unexpectedly'
+      );
+    });
+
+    it('should not call handleMilestoneFailed when no current milestone', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+
+      Object.defineProperty(mockAgent, 'mode', { value: 'autonomous', writable: true, configurable: true });
+      mockLoopOrchestrator.isLooping.mockReturnValue(true);
+      mockLoopOrchestrator.getLoopState.mockReturnValue({
+        isLooping: true,
+        currentMilestone: null,
+        currentConversationId: null,
+      });
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('exit', 1);
+
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      expect(mockLoopOrchestrator.handleMilestoneFailed).not.toHaveBeenCalled();
+    });
+
+    it('should save context usage on exit when available', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+
+      const contextUsage = {
+        inputTokens: 500,
+        outputTokens: 200,
+        totalTokens: 700,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+        maxContextTokens: 200000,
+        percentUsed: 0.35,
+      };
+      Object.defineProperty(mockAgent, 'contextUsage', { value: contextUsage, writable: true, configurable: true });
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('exit', 0);
+
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Context usage should have been saved via the project repo
+      expect(mockProjectRepo.updateContextUsage).toHaveBeenCalledWith(
+        'test-project',
+        contextUsage
+      );
     });
   });
 
