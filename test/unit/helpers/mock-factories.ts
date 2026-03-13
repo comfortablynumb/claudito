@@ -1116,6 +1116,7 @@ export function createMockAgentManager(): jest.Mocked<AgentManager> {
       loopStates.delete(projectId);
     }
   };
+  (mock as unknown as { _emitter: EventEmitter })._emitter = emitter;
 
   return mock;
 }
