@@ -13,6 +13,7 @@ import {
   createMockRoadmapParser,
   createMockPermissionGenerator,
   createMockSettingsRepository,
+  createMockContainerManager,
   createTestProject,
 } from '../helpers/mock-factories';
 
@@ -1956,6 +1957,477 @@ describe('DefaultAgentManager', () => {
           }),
         })
       );
+    });
+  });
+
+  describe('Docker process spawner integration', () => {
+    it('should return no docker spawner when containerManager not provided', async () => {
+      // Default setup has no containerManager
+      const result = await agentManager.startInteractiveAgent('test-project');
+      expect(result.containerRestarted).toBe(false);
+      expect(result.dockerFallback).toBe(false);
+    });
+
+    it('should return docker spawner when Docker is enabled', async () => {
+      const mockContainerManager = createMockContainerManager();
+      mockSettingsRepo.get.mockResolvedValue({
+        claudePermissions: {
+          dangerouslySkipPermissions: false,
+          defaultMode: 'acceptEdits',
+          allowRules: [],
+          denyRules: [],
+        },
+        docker: { enabled: true },
+      } as unknown as ReturnType<typeof mockSettingsRepo.get> extends Promise<infer T> ? T : never);
+
+      const manager = new DefaultAgentManager({
+        maxConcurrentAgents: 3,
+        agentFactory: mockAgentFactory,
+        projectRepository: mockProjectRepo,
+        conversationRepository: mockConversationRepo,
+        instructionGenerator: mockInstructionGenerator,
+        roadmapParser: mockRoadmapParser,
+        permissionGenerator: mockPermissionGenerator,
+        settingsRepository: mockSettingsRepo,
+        containerManager: mockContainerManager,
+      });
+
+      const result = await manager.startInteractiveAgent('test-project');
+
+      expect(mockContainerManager.ensureContainer).toHaveBeenCalledWith(
+        'test-project',
+        '/test/path',
+        undefined
+      );
+      expect(result.containerRestarted).toBe(false);
+      expect(result.dockerFallback).toBe(false);
+
+      await manager.stopAllAgents();
+    });
+
+    it('should report containerRestarted when container was created', async () => {
+      const mockContainerManager = createMockContainerManager();
+      mockContainerManager.ensureContainer.mockResolvedValue({
+        containerId: 'new-container',
+        imageName: 'claudito:latest',
+        wasCreated: true,
+        wasRestarted: false,
+      });
+
+      mockSettingsRepo.get.mockResolvedValue({
+        claudePermissions: {
+          dangerouslySkipPermissions: false,
+          defaultMode: 'acceptEdits',
+          allowRules: [],
+          denyRules: [],
+        },
+        docker: { enabled: true },
+      } as unknown as ReturnType<typeof mockSettingsRepo.get> extends Promise<infer T> ? T : never);
+
+      const manager = new DefaultAgentManager({
+        maxConcurrentAgents: 3,
+        agentFactory: mockAgentFactory,
+        projectRepository: mockProjectRepo,
+        conversationRepository: mockConversationRepo,
+        instructionGenerator: mockInstructionGenerator,
+        roadmapParser: mockRoadmapParser,
+        permissionGenerator: mockPermissionGenerator,
+        settingsRepository: mockSettingsRepo,
+        containerManager: mockContainerManager,
+      });
+
+      const result = await manager.startInteractiveAgent('test-project');
+
+      expect(result.containerRestarted).toBe(true);
+      expect(result.containerImageName).toBe('claudito:latest');
+
+      await manager.stopAllAgents();
+    });
+
+    it('should fallback when Docker container creation fails', async () => {
+      const mockContainerManager = createMockContainerManager();
+      mockContainerManager.ensureContainer.mockRejectedValue(new Error('Docker daemon not running'));
+
+      mockSettingsRepo.get.mockResolvedValue({
+        claudePermissions: {
+          dangerouslySkipPermissions: false,
+          defaultMode: 'acceptEdits',
+          allowRules: [],
+          denyRules: [],
+        },
+        docker: { enabled: true },
+      } as unknown as ReturnType<typeof mockSettingsRepo.get> extends Promise<infer T> ? T : never);
+
+      const manager = new DefaultAgentManager({
+        maxConcurrentAgents: 3,
+        agentFactory: mockAgentFactory,
+        projectRepository: mockProjectRepo,
+        conversationRepository: mockConversationRepo,
+        instructionGenerator: mockInstructionGenerator,
+        roadmapParser: mockRoadmapParser,
+        permissionGenerator: mockPermissionGenerator,
+        settingsRepository: mockSettingsRepo,
+        containerManager: mockContainerManager,
+      });
+
+      const result = await manager.startInteractiveAgent('test-project');
+
+      expect(result.dockerFallback).toBe(true);
+      expect(result.dockerFallbackReason).toBe('Docker daemon not running');
+
+      await manager.stopAllAgents();
+    });
+
+    it('should not use Docker when docker.enabled is false in settings', async () => {
+      const mockContainerManager = createMockContainerManager();
+      // Default settings have no docker.enabled
+
+      const manager = new DefaultAgentManager({
+        maxConcurrentAgents: 3,
+        agentFactory: mockAgentFactory,
+        projectRepository: mockProjectRepo,
+        conversationRepository: mockConversationRepo,
+        instructionGenerator: mockInstructionGenerator,
+        roadmapParser: mockRoadmapParser,
+        permissionGenerator: mockPermissionGenerator,
+        settingsRepository: mockSettingsRepo,
+        containerManager: mockContainerManager,
+      });
+
+      const result = await manager.startInteractiveAgent('test-project');
+
+      expect(mockContainerManager.ensureContainer).not.toHaveBeenCalled();
+      expect(result.dockerFallback).toBe(false);
+
+      await manager.stopAllAgents();
+    });
+
+    it('should skip Docker when project has dockerOverride=false', async () => {
+      const projectWithDockerOff = createTestProject({
+        id: 'docker-off-proj',
+        path: '/docker/off',
+      });
+      (projectWithDockerOff as unknown as Record<string, unknown>).dockerOverride = false;
+
+      const projRepo = createMockProjectRepository([projectWithDockerOff]);
+      const mockContainerManager = createMockContainerManager();
+
+      mockSettingsRepo.get.mockResolvedValue({
+        claudePermissions: {
+          dangerouslySkipPermissions: false,
+          defaultMode: 'acceptEdits',
+          allowRules: [],
+          denyRules: [],
+        },
+        docker: { enabled: true },
+      } as unknown as ReturnType<typeof mockSettingsRepo.get> extends Promise<infer T> ? T : never);
+
+      const manager = new DefaultAgentManager({
+        maxConcurrentAgents: 3,
+        agentFactory: mockAgentFactory,
+        projectRepository: projRepo,
+        conversationRepository: mockConversationRepo,
+        instructionGenerator: mockInstructionGenerator,
+        roadmapParser: mockRoadmapParser,
+        permissionGenerator: mockPermissionGenerator,
+        settingsRepository: mockSettingsRepo,
+        containerManager: mockContainerManager,
+      });
+
+      const result = await manager.startInteractiveAgent('docker-off-proj');
+
+      expect(mockContainerManager.ensureContainer).not.toHaveBeenCalled();
+      expect(result.dockerFallback).toBe(false);
+
+      await manager.stopAllAgents();
+    });
+  });
+
+  describe('MCP server overrides', () => {
+    it('should pass MCP servers to agent when project has overrides', async () => {
+      const projectWithMcp = createTestProject({
+        id: 'mcp-proj',
+        path: '/mcp/path',
+      });
+      (projectWithMcp as unknown as Record<string, unknown>).mcpOverrides = {
+        enabled: true,
+        serverOverrides: {
+          'server-1': { enabled: true },
+          'server-2': { enabled: false },
+        },
+      };
+
+      const projRepo = createMockProjectRepository([projectWithMcp]);
+
+      mockSettingsRepo.get.mockResolvedValue({
+        claudePermissions: {
+          dangerouslySkipPermissions: false,
+          defaultMode: 'acceptEdits',
+          allowRules: [],
+          denyRules: [],
+        },
+        mcp: {
+          enabled: true,
+          servers: [
+            { id: 'server-1', name: 'Server 1', command: 'cmd1', args: [], enabled: true },
+            { id: 'server-2', name: 'Server 2', command: 'cmd2', args: [], enabled: true },
+            { id: 'server-3', name: 'Server 3', command: 'cmd3', args: [], enabled: true },
+          ],
+        },
+      } as unknown as ReturnType<typeof mockSettingsRepo.get> extends Promise<infer T> ? T : never);
+
+      const manager = new DefaultAgentManager({
+        maxConcurrentAgents: 3,
+        agentFactory: mockAgentFactory,
+        projectRepository: projRepo,
+        conversationRepository: mockConversationRepo,
+        instructionGenerator: mockInstructionGenerator,
+        roadmapParser: mockRoadmapParser,
+        permissionGenerator: mockPermissionGenerator,
+        settingsRepository: mockSettingsRepo,
+      });
+
+      await manager.startInteractiveAgent('mcp-proj');
+
+      // Only server-1 should be passed (server-2 disabled, server-3 not in overrides)
+      expect(mockAgentFactory.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mcpServers: [
+            expect.objectContaining({ id: 'server-1' }),
+          ],
+        })
+      );
+
+      await manager.stopAllAgents();
+    });
+
+    it('should pass no MCP servers when overrides not enabled', async () => {
+      const projectNoMcp = createTestProject({
+        id: 'no-mcp-proj',
+        path: '/no-mcp/path',
+      });
+      (projectNoMcp as unknown as Record<string, unknown>).mcpOverrides = {
+        enabled: false,
+        serverOverrides: {},
+      };
+
+      const projRepo = createMockProjectRepository([projectNoMcp]);
+
+      mockSettingsRepo.get.mockResolvedValue({
+        claudePermissions: {
+          dangerouslySkipPermissions: false,
+          defaultMode: 'acceptEdits',
+          allowRules: [],
+          denyRules: [],
+        },
+        mcp: {
+          enabled: true,
+          servers: [
+            { id: 'server-1', name: 'Server 1', command: 'cmd1', args: [], enabled: true },
+          ],
+        },
+      } as unknown as ReturnType<typeof mockSettingsRepo.get> extends Promise<infer T> ? T : never);
+
+      const manager = new DefaultAgentManager({
+        maxConcurrentAgents: 3,
+        agentFactory: mockAgentFactory,
+        projectRepository: projRepo,
+        conversationRepository: mockConversationRepo,
+        instructionGenerator: mockInstructionGenerator,
+        roadmapParser: mockRoadmapParser,
+        permissionGenerator: mockPermissionGenerator,
+        settingsRepository: mockSettingsRepo,
+      });
+
+      await manager.startInteractiveAgent('no-mcp-proj');
+
+      expect(mockAgentFactory.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mcpServers: [],
+        })
+      );
+
+      await manager.stopAllAgents();
+    });
+  });
+
+  describe('message saving via agent listeners', () => {
+    it('should save stdout messages to conversation', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+
+      // Trigger a message event from the agent
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('message', {
+        type: 'stdout',
+        content: 'Hello world',
+        timestamp: new Date().toISOString(),
+      });
+
+      // Wait for async save
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(mockConversationRepo.addMessage).toHaveBeenCalledWith(
+        'test-project',
+        expect.any(String),
+        expect.objectContaining({ type: 'stdout', content: 'Hello world' })
+      );
+    });
+
+    it('should save tool_use messages to conversation', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('message', {
+        type: 'tool_use',
+        content: 'Using Read tool',
+        timestamp: new Date().toISOString(),
+        toolInfo: { name: 'Read', id: 'tool-1' },
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(mockConversationRepo.addMessage).toHaveBeenCalledWith(
+        'test-project',
+        expect.any(String),
+        expect.objectContaining({ type: 'tool_use' })
+      );
+    });
+
+    it('should save tool_result messages to conversation', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('message', {
+        type: 'tool_result',
+        content: 'Result from tool',
+        timestamp: new Date().toISOString(),
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(mockConversationRepo.addMessage).toHaveBeenCalledWith(
+        'test-project',
+        expect.any(String),
+        expect.objectContaining({ type: 'tool_result' })
+      );
+    });
+
+    it('should not save user messages through agent listener', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('message', {
+        type: 'user',
+        content: 'User message',
+        timestamp: new Date().toISOString(),
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // addMessage should not have been called for user type via the agent listener
+      const addMessageCalls = mockConversationRepo.addMessage.mock.calls;
+      const userTypeCalls = addMessageCalls.filter(
+        (call: unknown[]) => (call[2] as { type: string })?.type === 'user'
+      );
+      expect(userTypeCalls).toHaveLength(0);
+    });
+
+  });
+
+  describe('agent exit with context usage', () => {
+    it('should save context usage on agent exit', async () => {
+      const contextUsage: ContextUsage = {
+        inputTokens: 500,
+        outputTokens: 500,
+        totalTokens: 1000,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+        maxContextTokens: 200000,
+        percentUsed: 0.5,
+      };
+      Object.defineProperty(mockAgent, 'contextUsage', { value: contextUsage, writable: true });
+
+      await agentManager.startInteractiveAgent('test-project');
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('exit', 0);
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(mockProjectRepo.updateContextUsage).toHaveBeenCalledWith(
+        'test-project',
+        contextUsage
+      );
+    });
+  });
+
+  describe('dockerFallbackWarning event', () => {
+    it('should emit dockerFallbackWarning when Docker fails', async () => {
+      const warningHandler = jest.fn();
+      const mockContainerManager = createMockContainerManager();
+      mockContainerManager.ensureContainer.mockRejectedValue(new Error('No Docker'));
+
+      mockSettingsRepo.get.mockResolvedValue({
+        claudePermissions: {
+          dangerouslySkipPermissions: false,
+          defaultMode: 'acceptEdits',
+          allowRules: [],
+          denyRules: [],
+        },
+        docker: { enabled: true },
+      } as unknown as ReturnType<typeof mockSettingsRepo.get> extends Promise<infer T> ? T : never);
+
+      const manager = new DefaultAgentManager({
+        maxConcurrentAgents: 3,
+        agentFactory: mockAgentFactory,
+        projectRepository: mockProjectRepo,
+        conversationRepository: mockConversationRepo,
+        instructionGenerator: mockInstructionGenerator,
+        roadmapParser: mockRoadmapParser,
+        permissionGenerator: mockPermissionGenerator,
+        settingsRepository: mockSettingsRepo,
+        containerManager: mockContainerManager,
+      });
+
+      manager.on('dockerFallbackWarning', warningHandler);
+
+      const result = await manager.startInteractiveAgent('test-project');
+
+      expect(result.dockerFallback).toBe(true);
+
+      await manager.stopAllAgents();
+    });
+  });
+
+  describe('Slack message integration', () => {
+    it('should save and emit initial Slack message', async () => {
+      const messageHandler = jest.fn();
+      agentManager.on('message', messageHandler);
+
+      await agentManager.startInteractiveAgent('test-project', {
+        initialMessage: 'Hello from Slack',
+        slackMeta: { source: 'slack', slackUsername: 'testuser' },
+      });
+
+      // Should save user message and emit it
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(mockConversationRepo.addMessage).toHaveBeenCalledWith(
+        'test-project',
+        expect.any(String),
+        expect.objectContaining({
+          type: 'user',
+          content: 'Hello from Slack',
+          source: 'slack',
+          slackUsername: 'testuser',
+        })
+      );
+
+      // Should emit to other connected clients
+      const userMessages = messageHandler.mock.calls.filter(
+        (call: unknown[]) => (call[1] as { type: string })?.type === 'user'
+      );
+      expect(userMessages.length).toBeGreaterThan(0);
     });
   });
 });
