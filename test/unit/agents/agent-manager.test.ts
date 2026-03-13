@@ -2430,4 +2430,309 @@ describe('DefaultAgentManager', () => {
       expect(userMessages.length).toBeGreaterThan(0);
     });
   });
+
+  describe('handleStatusChange via agent status events', () => {
+    it('should update project status to running when agent status is running', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('status', 'running');
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(mockProjectRepo.updateStatus).toHaveBeenCalledWith('test-project', 'running');
+    });
+
+    it('should update project status to error when agent status is error', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('status', 'error');
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(mockProjectRepo.updateStatus).toHaveBeenCalledWith('test-project', 'error');
+    });
+
+    it('should update project status to stopped for other statuses', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('status', 'idle');
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(mockProjectRepo.updateStatus).toHaveBeenCalledWith('test-project', 'stopped');
+    });
+
+    it('should emit status event to listeners', async () => {
+      const statusHandler = jest.fn();
+      agentManager.on('status', statusHandler);
+
+      await agentManager.startInteractiveAgent('test-project');
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('status', 'running');
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(statusHandler).toHaveBeenCalledWith('test-project', 'running');
+    });
+
+    it('should handle updateStatus failure gracefully', async () => {
+      mockProjectRepo.updateStatus.mockRejectedValueOnce(new Error('DB error'));
+
+      await agentManager.startInteractiveAgent('test-project');
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('status', 'running');
+
+      // Should not throw
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(mockProjectRepo.updateStatus).toHaveBeenCalledWith('test-project', 'running');
+    });
+  });
+
+  describe('recordBashCommand via tool_use messages', () => {
+    it('should record Bash commands and expose via getRecentCommands', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('message', {
+        type: 'tool_use',
+        content: 'Running command',
+        timestamp: new Date().toISOString(),
+        toolInfo: {
+          name: 'Bash',
+          id: 'tool-bash-1',
+          input: { command: 'npm test' },
+        },
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      const commands = agentManager.getRecentCommands('test-project');
+      expect(commands).toHaveLength(1);
+      expect(commands[0]!.command).toBe('npm test');
+    });
+
+    it('should record Bash command with workdir', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('message', {
+        type: 'tool_use',
+        content: 'Running command',
+        timestamp: new Date().toISOString(),
+        toolInfo: {
+          name: 'Bash',
+          id: 'tool-bash-2',
+          input: { command: 'ls -la', cwd: '/home/user' },
+        },
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      const commands = agentManager.getRecentCommands('test-project');
+      expect(commands).toHaveLength(1);
+      expect(commands[0]!.command).toBe('ls -la');
+      expect(commands[0]!.workdir).toBe('/home/user');
+    });
+
+    it('should ignore non-Bash tool_use messages', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('message', {
+        type: 'tool_use',
+        content: 'Reading file',
+        timestamp: new Date().toISOString(),
+        toolInfo: {
+          name: 'Read',
+          id: 'tool-read-1',
+          input: { file_path: '/some/file' },
+        },
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      const commands = agentManager.getRecentCommands('test-project');
+      expect(commands).toHaveLength(0);
+    });
+
+    it('should ignore Bash commands with empty string', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('message', {
+        type: 'tool_use',
+        content: 'Running command',
+        timestamp: new Date().toISOString(),
+        toolInfo: {
+          name: 'Bash',
+          id: 'tool-bash-3',
+          input: { command: '  ' },
+        },
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      const commands = agentManager.getRecentCommands('test-project');
+      expect(commands).toHaveLength(0);
+    });
+
+    it('should cap recent commands at 50 entries', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+
+      for (let i = 0; i < 55; i++) {
+        agent._emit('message', {
+          type: 'tool_use',
+          content: 'Running command',
+          timestamp: new Date().toISOString(),
+          toolInfo: {
+            name: 'Bash',
+            id: `tool-bash-${i}`,
+            input: { command: `cmd-${i}` },
+          },
+        });
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      const commands = agentManager.getRecentCommands('test-project');
+      expect(commands).toHaveLength(50);
+      // Should have trimmed the oldest entries
+      expect(commands[0]!.command).toBe('cmd-5');
+      expect(commands[49]!.command).toBe('cmd-54');
+    });
+  });
+
+  describe('handleSessionNotFound via agent event', () => {
+    it('should handle sessionNotFound event without crashing', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('sessionNotFound', 'missing-session-id');
+
+      // Should not throw - just log and continue
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // The session manager internally handles recovery
+      // At minimum, verify the agent manager didn't crash
+      expect(agentManager.getFullStatus('test-project')).toBeDefined();
+    });
+  });
+
+  describe('handleEnterPlanMode system message emission', () => {
+    it('should emit a hidden system message when entering plan mode', async () => {
+      const messageHandler = jest.fn();
+      agentManager.on('message', messageHandler);
+
+      await agentManager.startInteractiveAgent('test-project');
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('enterPlanMode');
+
+      // Wait for async handling (includes 500ms delay)
+      await new Promise(resolve => setTimeout(resolve, 700));
+
+      // Should emit a hidden system message about plan mode switch
+      const systemMessages = messageHandler.mock.calls.filter(
+        (call: unknown[]) => (call[1] as { type: string })?.type === 'system'
+      );
+      expect(systemMessages.length).toBeGreaterThan(0);
+      expect(systemMessages[0][1]).toMatchObject({
+        type: 'system',
+        content: '[Switched to Plan mode]',
+        hidden: true,
+      });
+    });
+  });
+
+  describe('handleAgentExit with autonomous loop', () => {
+    it('should handle milestone failure when autonomous agent exits with active loop', async () => {
+      // We need to test the autonomous exit path
+      // The loop orchestrator is internal, so we can test the behavior indirectly
+      // by checking that the agent manager handles the exit gracefully
+
+      await agentManager.startInteractiveAgent('test-project');
+
+      // Set agent mode to autonomous
+      Object.defineProperty(mockAgent, 'mode', { value: 'autonomous', writable: true });
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+      agent._emit('exit', 1);
+
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // After exit, agent should be cleaned up
+      const status = agentManager.getFullStatus('test-project');
+      expect(status.status).toBe('stopped');
+    });
+  });
+
+  describe('autonomous mode completion response handling', () => {
+    it('should check for completion markers in autonomous mode messages', async () => {
+      // Start agent and set it to autonomous mode
+      await agentManager.startInteractiveAgent('test-project');
+      Object.defineProperty(mockAgent, 'mode', { value: 'autonomous', writable: true });
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+
+      // Send a stdout message with completion marker
+      agent._emit('message', {
+        type: 'stdout',
+        content: 'MILESTONE COMPLETE: All tests passing',
+        timestamp: new Date().toISOString(),
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // The loop orchestrator will parse this but since there's no active loop,
+      // handleAgentCompletionResponse will return early (no project or no current milestone)
+      // This still exercises the code path through the message listener
+      expect(agentManager.getFullStatus('test-project')).toBeDefined();
+    });
+
+    it('should not parse completion for non-autonomous mode', async () => {
+      await agentManager.startInteractiveAgent('test-project');
+
+      const agent = mockAgent as unknown as { _emit: (event: string, ...args: unknown[]) => void };
+
+      // In interactive mode, completion markers in messages should be ignored
+      agent._emit('message', {
+        type: 'stdout',
+        content: 'MILESTONE COMPLETE: Done',
+        timestamp: new Date().toISOString(),
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Agent should still be running (not stopped by completion handler)
+      const status = agentManager.getFullStatus('test-project');
+      expect(status.status).toBe('running');
+    });
+  });
+
+  describe('getLastCommand', () => {
+    it('should return null when no agent exists', () => {
+      expect(agentManager.getLastCommand('non-existent')).toBeNull();
+    });
+
+    it('should return lastCommand from active agent', async () => {
+      Object.defineProperty(mockAgent, 'lastCommand', { value: 'git status', writable: true });
+      await agentManager.startInteractiveAgent('test-project');
+
+      expect(agentManager.getLastCommand('test-project')).toBe('git status');
+    });
+  });
+
+  describe('getRecentCommands', () => {
+    it('should return empty array for project with no commands', () => {
+      expect(agentManager.getRecentCommands('non-existent')).toEqual([]);
+    });
+  });
 });

@@ -543,6 +543,142 @@ describe('DefaultSlackSocketService', () => {
 });
 
 // ============================================================================
+// DefaultSlackSocketService - event listener callbacks
+// ============================================================================
+
+describe('DefaultSlackSocketService event listeners', () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let capturedHandlers: Map<string, (...args: any[]) => void>;
+  let mockSocketClient: { start: jest.Mock; disconnect: jest.Mock; on: jest.Mock };
+
+  beforeEach(() => {
+    capturedHandlers = new Map();
+    mockSocketClient = {
+      start: jest.fn().mockResolvedValue(undefined),
+      disconnect: jest.fn().mockResolvedValue(undefined),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      on: jest.fn().mockImplementation((event: string, handler: (...args: any[]) => void) => {
+        capturedHandlers.set(event, handler);
+      }),
+    };
+
+    // Re-mock SocketModeClient to capture handlers
+    const socketMode = jest.requireMock('@slack/socket-mode') as { SocketModeClient: jest.Mock };
+    socketMode.SocketModeClient.mockImplementation(() => mockSocketClient);
+  });
+
+  it('should call slash command handler when registered and event fires', async () => {
+    const service = new DefaultSlackSocketService();
+    const handler = jest.fn();
+    service.onSlashCommand(handler);
+
+    await service.connect('xapp-token');
+
+    // Trigger the slash_commands event
+    const slashHandler = capturedHandlers.get('slash_commands');
+    expect(slashHandler).toBeDefined();
+
+    const mockAck = jest.fn().mockResolvedValue(undefined);
+    const mockBody = { command: '/test', text: 'hello' };
+
+    await slashHandler!({ body: mockBody, ack: mockAck });
+
+    // Wait for the async IIFE
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    expect(handler).toHaveBeenCalledWith(mockBody, mockAck);
+  });
+
+  it('should ack slash command when no handler registered', async () => {
+    const service = new DefaultSlackSocketService();
+
+    await service.connect('xapp-token');
+
+    const slashHandler = capturedHandlers.get('slash_commands');
+    expect(slashHandler).toBeDefined();
+
+    const mockAck = jest.fn().mockResolvedValue(undefined);
+    await slashHandler!({ body: { command: '/test' }, ack: mockAck });
+
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    expect(mockAck).toHaveBeenCalled();
+  });
+
+  it('should call interactive action handler when registered and event fires', async () => {
+    const service = new DefaultSlackSocketService();
+    const handler = jest.fn();
+    service.onInteractiveAction(handler);
+
+    await service.connect('xapp-token');
+
+    const interactiveHandler = capturedHandlers.get('interactive');
+    expect(interactiveHandler).toBeDefined();
+
+    const mockAck = jest.fn().mockResolvedValue(undefined);
+    const mockBody = { type: 'block_actions', actions: [] };
+
+    await interactiveHandler!({ body: mockBody, ack: mockAck });
+
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    expect(handler).toHaveBeenCalledWith(mockBody, mockAck);
+  });
+
+  it('should ack interactive action when no handler registered', async () => {
+    const service = new DefaultSlackSocketService();
+
+    await service.connect('xapp-token');
+
+    const interactiveHandler = capturedHandlers.get('interactive');
+    expect(interactiveHandler).toBeDefined();
+
+    const mockAck = jest.fn().mockResolvedValue(undefined);
+    await interactiveHandler!({ body: {}, ack: mockAck });
+
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    expect(mockAck).toHaveBeenCalled();
+  });
+
+  it('should call message handler when registered and event fires', async () => {
+    const service = new DefaultSlackSocketService();
+    const handler = jest.fn();
+    service.onMessageEvent(handler);
+
+    await service.connect('xapp-token');
+
+    const messageHandler = capturedHandlers.get('message');
+    expect(messageHandler).toBeDefined();
+
+    const mockAck = jest.fn().mockResolvedValue(undefined);
+    const mockEvent = { type: 'message', text: 'hello', user: 'U123' };
+
+    await messageHandler!({ event: mockEvent, ack: mockAck });
+
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    expect(handler).toHaveBeenCalledWith(mockEvent, mockAck);
+  });
+
+  it('should ack message event when no handler registered', async () => {
+    const service = new DefaultSlackSocketService();
+
+    await service.connect('xapp-token');
+
+    const messageHandler = capturedHandlers.get('message');
+    expect(messageHandler).toBeDefined();
+
+    const mockAck = jest.fn().mockResolvedValue(undefined);
+    await messageHandler!({ event: { type: 'message' }, ack: mockAck });
+
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    expect(mockAck).toHaveBeenCalled();
+  });
+});
+
+// ============================================================================
 // Factory functions
 // ============================================================================
 
