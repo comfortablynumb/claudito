@@ -1,11 +1,21 @@
 import { EventEmitter } from 'events';
-import { ChildProcess } from 'child_process';
+import { ChildProcess, execFile } from 'child_process';
 import {
   ProcessManager,
   ProcessSpawner,
   SpawnOptions,
 } from '../../../src/agents/process-manager';
 import { Logger } from '../../../src/utils';
+
+jest.mock('child_process', () => {
+  const actual = jest.requireActual('child_process');
+  return {
+    ...actual,
+    execFile: jest.fn((cmd: string, args: string[], cb: (err: Error | null) => void) => cb(null)),
+  };
+});
+
+const mockExecFile = execFile as unknown as jest.Mock;
 
 function createMockLogger(): jest.Mocked<Logger> {
   const mock: jest.Mocked<Logger> = {
@@ -55,6 +65,7 @@ describe('ProcessManager', () => {
   let mockChild: ChildProcess;
 
   beforeEach(() => {
+    process.setMaxListeners(50);
     mockLogger = createMockLogger();
     mockChild = createMockChildProcess();
     mockSpawner = createMockSpawner(mockChild);
@@ -327,6 +338,212 @@ describe('ProcessManager', () => {
 
     it('should return false for a non-existent PID', () => {
       expect(ProcessManager.isProcessRunning(999999)).toBe(false);
+    });
+  });
+
+  // =========================================================================
+  // stop - Windows path (execFile taskkill)
+  // =========================================================================
+  describe('stop - Windows taskkill', () => {
+    beforeEach(() => {
+      mockExecFile.mockClear();
+    });
+
+    it('should call taskkill with /F /T flags on stop', async () => {
+      mockExecFile.mockImplementation(
+        (_cmd: string, _args: string[], cb: (err: Error | null) => void) => cb(null)
+      );
+      pm.spawn('claude', [], '/tmp');
+
+      await pm.stop();
+
+      expect(mockExecFile).toHaveBeenCalledWith(
+        'taskkill',
+        ['/PID', '1234', '/F', '/T'],
+        expect.any(Function)
+      );
+      expect(pm.getProcess()).toBeNull();
+    });
+
+    it('should handle taskkill error on stop and still clean up', async () => {
+      mockExecFile.mockImplementation(
+        (_cmd: string, _args: string[], cb: (err: Error | null) => void) =>
+          cb(new Error('process not found'))
+      );
+      pm.spawn('claude', [], '/tmp');
+
+      await pm.stop();
+
+      expect(pm.getProcess()).toBeNull();
+    });
+
+    it('should handle taskkill non-not-found error on stop', async () => {
+      mockExecFile.mockImplementation(
+        (_cmd: string, _args: string[], cb: (err: Error | null) => void) =>
+          cb(new Error('access denied'))
+      );
+      pm.spawn('claude', [], '/tmp');
+
+      await pm.stop();
+
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        'Failed to kill process',
+        expect.objectContaining({ pid: 1234 })
+      );
+      expect(pm.getProcess()).toBeNull();
+    });
+
+    it('should log error when stop throws unexpectedly', async () => {
+      mockExecFile.mockImplementation(() => {
+        throw new Error('unexpected failure');
+      });
+      pm.spawn('claude', [], '/tmp');
+
+      await pm.stop();
+
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        'Error stopping process',
+        expect.objectContaining({ pid: 1234 })
+      );
+      expect(pm.getProcess()).toBeNull();
+    });
+  });
+
+  // =========================================================================
+  // kill - Windows path (execFile taskkill)
+  // =========================================================================
+  describe('kill - Windows taskkill', () => {
+    beforeEach(() => {
+      mockExecFile.mockClear();
+    });
+
+    it('should call taskkill on kill', () => {
+      mockExecFile.mockImplementation(
+        (_cmd: string, _args: string[], cb: (err: Error | null) => void) => cb(null)
+      );
+      pm.spawn('claude', [], '/tmp');
+
+      pm.kill();
+
+      expect(mockExecFile).toHaveBeenCalledWith(
+        'taskkill',
+        ['/PID', '1234', '/F', '/T'],
+        expect.any(Function)
+      );
+      expect(pm.getProcess()).toBeNull();
+    });
+
+    it('should handle taskkill error callback on kill', () => {
+      mockExecFile.mockImplementation(
+        (_cmd: string, _args: string[], cb: (err: Error | null) => void) =>
+          cb(new Error('kill failed'))
+      );
+      pm.spawn('claude', [], '/tmp');
+
+      pm.kill();
+
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        'Failed to force kill process tree',
+        expect.objectContaining({ pid: 1234 })
+      );
+      expect(pm.getProcess()).toBeNull();
+    });
+
+    it('should handle execFile throwing on kill', () => {
+      mockExecFile.mockImplementation(() => {
+        throw new Error('execFile crash');
+      });
+      pm.spawn('claude', [], '/tmp');
+
+      pm.kill();
+
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        'Error force killing process',
+        expect.objectContaining({ pid: 1234 })
+      );
+      expect(pm.getProcess()).toBeNull();
+    });
+
+    it('should not kill process with no PID', () => {
+      pm.spawn('claude', [], '/tmp');
+      Object.defineProperty(mockChild, 'pid', {
+        value: undefined,
+        writable: true,
+      });
+
+      pm.kill();
+
+      expect(mockExecFile).not.toHaveBeenCalled();
+    });
+  });
+
+  // =========================================================================
+  // static killProcess
+  // =========================================================================
+  describe('static killProcess', () => {
+    beforeEach(() => {
+      mockExecFile.mockClear();
+    });
+
+    it('should call taskkill on Windows', async () => {
+      mockExecFile.mockImplementation(
+        (_cmd: string, _args: string[], cb: (err: Error | null) => void) => cb(null)
+      );
+
+      await ProcessManager.killProcess(5678);
+
+      expect(mockExecFile).toHaveBeenCalledWith(
+        'taskkill',
+        ['/PID', '5678', '/F', '/T'],
+        expect.any(Function)
+      );
+    });
+
+    it('should resolve even when taskkill reports error', async () => {
+      mockExecFile.mockImplementation(
+        (_cmd: string, _args: string[], cb: (err: Error | null) => void) =>
+          cb(new Error('process not found'))
+      );
+
+      await expect(ProcessManager.killProcess(5678)).resolves.toBeUndefined();
+    });
+  });
+
+  // =========================================================================
+  // Edge cases
+  // =========================================================================
+  describe('edge cases', () => {
+    it('should handle exit with signal', () => {
+      pm.spawn('claude', [], '/tmp');
+      const exitListener = jest.fn();
+      pm.on('exit', exitListener);
+
+      mockChild.emit('exit', null, 'SIGTERM');
+
+      expect(exitListener).toHaveBeenCalledWith(null);
+    });
+
+    it('should handle exit with code 0', () => {
+      pm.spawn('claude', [], '/tmp');
+      const exitListener = jest.fn();
+      pm.on('exit', exitListener);
+
+      mockChild.emit('exit', 0, null);
+
+      expect(exitListener).toHaveBeenCalledWith(0);
+    });
+
+    it('should set isRunning false during shutdown', async () => {
+      mockExecFile.mockImplementation(
+        (_cmd: string, _args: string[], cb: (err: Error | null) => void) => {
+          // During the callback, isRunning should be false (isShuttingDown = true)
+          expect(pm.isRunning()).toBe(false);
+          cb(null);
+        }
+      );
+      pm.spawn('claude', [], '/tmp');
+
+      await pm.stop();
     });
   });
 });
