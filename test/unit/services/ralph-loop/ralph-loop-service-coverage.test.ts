@@ -879,6 +879,260 @@ describe('DefaultRalphLoopService - additional coverage', () => {
     });
   });
 
+  describe('worker tool_use event forwarding', () => {
+    it('should emit tool_use events from worker agent', async () => {
+      const service = createService();
+      const toolUseListener = jest.fn();
+      service.on('tool_use', toolUseListener);
+
+      mockWorkerAgentFactory.create = jest.fn().mockImplementation(() => {
+        const agent = new MockWorkerAgent();
+        agent.runFn = async (state) => {
+          // Emit tool_use after event handlers are attached
+          setTimeout(() => agent.emitter.emit('tool_use', {
+            tool_name: 'Write',
+            tool_id: 'tool-w1',
+            parameters: { file_path: '/src/index.ts' },
+            timestamp: new Date().toISOString(),
+          }), 2);
+          return new Promise<IterationSummary>((resolve) => {
+            setTimeout(() => resolve({
+              iterationNumber: state.currentIteration,
+              timestamp: new Date().toISOString(),
+              workerOutput: 'Done',
+              filesModified: ['/src/index.ts'],
+              tokensUsed: 200,
+              durationMs: 10,
+            }), 15);
+          });
+        };
+        lastWorkerAgent = agent;
+        return agent as unknown as WorkerAgent;
+      });
+
+      const config = createTestRalphLoopConfig();
+      await service.start('test-project', config);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      expect(toolUseListener).toHaveBeenCalledWith(
+        'test-project',
+        expect.any(String),
+        'worker',
+        expect.objectContaining({ tool_name: 'Write', tool_id: 'tool-w1' })
+      );
+    });
+  });
+
+  describe('delete method', () => {
+    it('should stop, delete from repo, and emit loop_deleted on success', async () => {
+      const service = createService();
+      const deletedListener = jest.fn();
+      service.on('loop_deleted', deletedListener);
+
+      mockRepository.delete.mockResolvedValue(true);
+
+      const config = createTestRalphLoopConfig();
+      const state = await service.start('test-project', config);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const result = await service.delete('test-project', state.taskId);
+
+      expect(result).toBe(true);
+      expect(mockRepository.delete).toHaveBeenCalledWith('test-project', state.taskId);
+      expect(deletedListener).toHaveBeenCalledWith('test-project', state.taskId);
+    });
+
+    it('should return false when repository delete returns false', async () => {
+      const service = createService();
+      const deletedListener = jest.fn();
+      service.on('loop_deleted', deletedListener);
+
+      mockRepository.delete.mockResolvedValue(false);
+
+      const config = createTestRalphLoopConfig();
+      const state = await service.start('test-project', config);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const result = await service.delete('test-project', state.taskId);
+
+      expect(result).toBe(false);
+      expect(deletedListener).not.toHaveBeenCalled();
+    });
+
+    it('should return false when delete throws an Error', async () => {
+      const service = createService();
+      mockRepository.delete.mockRejectedValue(new Error('Delete failed'));
+
+      const config = createTestRalphLoopConfig();
+      const state = await service.start('test-project', config);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const result = await service.delete('test-project', state.taskId);
+
+      expect(result).toBe(false);
+    });
+  });
+
+  describe('resume method', () => {
+    it('should resume a paused loop and start next iteration', async () => {
+      const service = createService();
+      const statusListener = jest.fn();
+      service.on('status_change', statusListener);
+
+      // Setup: findById returns paused state for resume, then active for iteration
+      mockRepository.findById.mockResolvedValue(
+        createTestRalphLoopState({
+          taskId: 'task-1',
+          status: 'paused',
+          currentIteration: 1,
+          projectId: 'test-project',
+        })
+      );
+
+      await service.resume('test-project', 'task-1');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      // Should have updated status to idle
+      expect(mockRepository.update).toHaveBeenCalledWith(
+        'test-project',
+        'task-1',
+        { status: 'idle' }
+      );
+    });
+
+    it('should throw when loop not found', async () => {
+      const service = createService();
+      mockRepository.findById.mockResolvedValue(null);
+
+      await expect(service.resume('test-project', 'missing'))
+        .rejects.toThrow('Ralph Loop not found: missing');
+    });
+
+    it('should throw when loop is not paused', async () => {
+      const service = createService();
+      mockRepository.findById.mockResolvedValue(
+        createTestRalphLoopState({ taskId: 'task-1', status: 'completed' })
+      );
+
+      await expect(service.resume('test-project', 'task-1'))
+        .rejects.toThrow('Cannot resume loop in status: completed');
+    });
+  });
+
+  describe('handleLoopError with non-Error object', () => {
+    it('should convert non-Error to string in error handler', async () => {
+      const service = createService();
+      const errorListener = jest.fn();
+      service.on('loop_error', errorListener);
+
+      mockWorkerAgentFactory.create = jest.fn().mockImplementation(() => {
+        const agent = new MockWorkerAgent();
+        agent.runFn = async () => {
+          throw 'string error thrown';
+        };
+        lastWorkerAgent = agent;
+        return agent as unknown as WorkerAgent;
+      });
+
+      const config = createTestRalphLoopConfig();
+      await service.start('test-project', config);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(errorListener).toHaveBeenCalledWith(
+        'test-project',
+        expect.any(String),
+        'string error thrown'
+      );
+
+      expect(mockRepository.update).toHaveBeenCalledWith(
+        'test-project',
+        expect.any(String),
+        expect.objectContaining({
+          status: 'failed',
+          error: 'string error thrown',
+        })
+      );
+    });
+  });
+
+  describe('max turns reached', () => {
+    it('should complete loop with max_turns_reached when limit hit', async () => {
+      const service = createService();
+      const completeListener = jest.fn();
+      service.on('loop_complete', completeListener);
+
+      // State already at max turns
+      mockRepository.findById.mockResolvedValue(
+        createTestRalphLoopState({
+          currentIteration: 5,
+          config: createTestRalphLoopConfig({ maxTurns: 5 }),
+        })
+      );
+
+      const config = createTestRalphLoopConfig({ maxTurns: 5 });
+      await service.start('test-project', config);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(completeListener).toHaveBeenCalledWith(
+        'test-project',
+        expect.any(String),
+        'max_turns_reached'
+      );
+    });
+  });
+
+  describe('reviewer reject decision', () => {
+    it('should complete loop with critical_failure on reject', async () => {
+      const service = createService();
+      const completeListener = jest.fn();
+      service.on('loop_complete', completeListener);
+
+      mockReviewerAgentFactory.create = jest.fn().mockImplementation(() => {
+        const agent = new MockReviewerAgent();
+        agent.runFn = async (state) => ({
+          iterationNumber: state.currentIteration,
+          timestamp: new Date().toISOString(),
+          decision: 'reject' as const,
+          feedback: 'Code is fundamentally wrong',
+          specificIssues: ['Major bug'],
+          suggestedImprovements: [],
+        });
+        lastReviewerAgent = agent;
+        return agent as unknown as ReviewerAgent;
+      });
+
+      const config = createTestRalphLoopConfig();
+      await service.start('test-project', config);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      expect(completeListener).toHaveBeenCalledWith(
+        'test-project',
+        expect.any(String),
+        'critical_failure'
+      );
+    });
+  });
+
+  describe('project path not found', () => {
+    it('should throw error when project path is null', async () => {
+      const resolver = createMockProjectPathResolver();
+      resolver.getProjectPath.mockReturnValue(null);
+      const service = createService({ projectPathResolver: resolver });
+      const errorListener = jest.fn();
+      service.on('loop_error', errorListener);
+
+      const config = createTestRalphLoopConfig();
+      await service.start('test-project', config);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(errorListener).toHaveBeenCalledWith(
+        'test-project',
+        expect.any(String),
+        expect.stringContaining('Project path not found')
+      );
+    });
+  });
+
   describe('off removes event listener', () => {
     it('should not receive events after unsubscribing', async () => {
       const service = createService();
