@@ -1,17 +1,10 @@
 import { Router, Request, Response } from 'express';
-import fs from 'fs';
-import path from 'path';
-import { asyncHandler, NotFoundError, ValidationError, getProjectLogs } from '../../utils';
-import { isPathWithinProject } from '../../utils/path-validator';
+import { asyncHandler, NotFoundError, ValidationError } from '../../utils';
 import { SUPPORTED_MODELS, isValidModel, getModelDisplayName, DEFAULT_MODEL } from '../../config/models';
-import { getAgentManager, getProcessTracker, getRalphLoopService, getWebSocketServer } from '../index';
-import { generateIdFromPath, AgentProfile, DEFAULT_AGENT_PROFILE } from '../../repositories';
+import { AgentProfile, DEFAULT_AGENT_PROFILE } from '../../repositories';
 import {
   ProjectRouterDependencies,
   CreateProjectBody,
-  DebugInfo,
-  MemoryUsage,
-  ClaudeFileSaveBody,
   PermissionOverridesBody,
   ModelOverrideBody,
   McpOverridesBody
@@ -22,6 +15,7 @@ import {
   checkRoadmap,
   findClaudeFiles
 } from './helpers';
+import { handleDiscoverProjects, handleGetDebugInfo, handleSaveClaudeFile } from './core-handlers';
 import { validateBody, validateParams } from '../../middleware/validation';
 import { validateProjectExists } from '../../middleware/project';
 import {
@@ -93,56 +87,7 @@ export function createCoreRouter(deps: ProjectRouterDependencies): Router {
   }));
 
   // Discover and register projects
-  router.post('/discover', asyncHandler(async (req: Request, res: Response): Promise<void> => {
-    const { searchPath } = req.body as { searchPath?: string };
-
-    if (!searchPath || typeof searchPath !== 'string') {
-      throw new ValidationError('Search path is required');
-    }
-
-    // Validate the search path exists
-    if (!fs.existsSync(searchPath)) {
-      throw new ValidationError('Search path does not exist');
-    }
-
-    if (!projectDiscoveryService) {
-      throw new NotFoundError('Project discovery service not available');
-    }
-
-    const discovered = await projectDiscoveryService.scanForProjects(searchPath);
-
-    const registered: Array<{ id: string; name: string; path: string }> = [];
-    const alreadyRegistered: string[] = [];
-    const failed: string[] = [];
-
-    for (const projectPath of discovered) {
-      try {
-        const projectId = generateIdFromPath(projectPath);
-        const existing = await projectRepository.findById(projectId);
-
-        if (existing) {
-          alreadyRegistered.push(projectPath);
-        } else {
-          const project = await projectRepository.create({
-            name: path.basename(projectPath),
-            path: projectPath
-          });
-          registered.push(project);
-        }
-      } catch (error) {
-        console.error('Failed to register project', { projectPath, error });
-        failed.push(projectPath);
-      }
-    }
-
-    res.json({
-      discovered: discovered.length,
-      registered: registered.length,
-      alreadyRegistered: alreadyRegistered.length,
-      failed: failed.length,
-      projects: registered
-    });
-  }));
+  router.post('/discover', asyncHandler(handleDiscoverProjects(deps)));
 
   // Get project by ID
   router.get('/:id', validateParams(projectIdSchema), projectExistsMiddleware, asyncHandler((req: Request, res: Response) => {
@@ -162,55 +107,7 @@ export function createCoreRouter(deps: ProjectRouterDependencies): Router {
   }));
 
   // Get debug information for a project
-  router.get('/:id/debug', validateParams(projectIdSchema), projectExistsMiddleware, asyncHandler(async (req: Request, res: Response): Promise<void> => {
-    const id = req.params['id'] as string;
-
-    const agentManager = getAgentManager();
-    const processTracker = getProcessTracker();
-    const ralphLoopService = getRalphLoopService();
-    const webSocketServer = getWebSocketServer();
-
-    const processInfo = agentManager?.getProcessInfo(id);
-    const debugInfo: DebugInfo = {
-      lastCommand: agentManager?.getLastCommand(id) ?? null,
-      cliCommands: agentManager?.getCliCommandHistory(id) ?? [],
-      processInfo: processInfo ? {
-        pid: processInfo.pid,
-        cwd: processInfo.cwd || '',
-        startedAt: processInfo.startedAt || '',
-      } : null,
-      loopState: agentManager?.getLoopState(id) ?? null,
-      recentLogs: getProjectLogs(id, 100),
-      trackedProcesses: processTracker && typeof processTracker === 'object' && 'getAllProcesses' in processTracker && typeof processTracker.getAllProcesses === 'function'
-        ? (processTracker.getAllProcesses() as Array<{ pid: number; projectId: string; startedAt: string }>)
-        : [],
-      memoryUsage: process.memoryUsage() as MemoryUsage,
-    };
-
-    // Add connected clients if WebSocket server is available
-    if (webSocketServer) {
-      debugInfo.connectedClients = webSocketServer.getConnectedClients(id);
-    }
-
-    // Add Ralph Loop status if service is available
-    if (ralphLoopService) {
-      const ralphLoops = await ralphLoopService.listByProject(id);
-      debugInfo.ralphLoops = {
-        count: ralphLoops.length,
-        activeLoops: ralphLoops.filter((loop) =>
-          loop.status === 'idle' ||
-          loop.status === 'worker_running' ||
-          loop.status === 'reviewer_running'
-        ).map((loop) => ({
-          taskId: loop.taskId,
-          status: loop.status,
-          currentTurn: loop.currentIteration,
-        })),
-      };
-    }
-
-    res.json(debugInfo);
-  }));
+  router.get('/:id/debug', validateParams(projectIdSchema), projectExistsMiddleware, asyncHandler(handleGetDebugInfo()));
 
   // Get project permission overrides
   router.get('/:id/permissions', validateParams(projectIdSchema), projectExistsMiddleware, asyncHandler((req: Request, res: Response) => {
@@ -362,55 +259,7 @@ export function createCoreRouter(deps: ProjectRouterDependencies): Router {
   }));
 
   // Save CLAUDE.md file
-  router.put('/:id/claude-files', validateParams(projectIdSchema), validateBody(saveClaudeFileSchema), projectExistsMiddleware, asyncHandler(async (req: Request, res: Response) => {
-    const project = req.project!;
-    const body = req.body as ClaudeFileSaveBody;
-    const { filePath, content } = body;
-
-    // Security: Ensure the file is a CLAUDE.md file and within allowed paths
-    const fileName = path.basename(filePath!);
-    if (fileName !== 'CLAUDE.md') {
-      throw new ValidationError('Can only edit CLAUDE.md files');
-    }
-
-    // Check if it's the global file
-    const homeDir = process.env.HOME || process.env.USERPROFILE || '';
-    const globalClaudePath = path.join(homeDir, '.claude', 'CLAUDE.md');
-    const isGlobalFile = path.resolve(filePath!) === path.resolve(globalClaudePath);
-
-    if (!isGlobalFile) {
-      // For project files, ensure they're within the project
-      const allowedPaths = [
-        path.join((project).path, 'CLAUDE.md'),
-        path.join((project).path, '.claude', 'CLAUDE.md'),
-      ];
-
-      const resolvedPath = path.resolve(filePath!);
-      const isAllowed = allowedPaths.some(allowed => resolvedPath === path.resolve(allowed));
-
-      if (!isAllowed) {
-        throw new ValidationError('Invalid file path');
-      }
-
-      // Additional check for path traversal
-      if (!isPathWithinProject(resolvedPath, (project).path)) {
-        throw new ValidationError('File path is outside project directory');
-      }
-    }
-
-    // Ensure directory exists
-    const dir = path.dirname(filePath!);
-    await fs.promises.mkdir(dir, { recursive: true });
-
-    // Write the file
-    await fs.promises.writeFile(filePath!, content!, 'utf-8');
-
-    res.json({
-      success: true,
-      filePath,
-      size: Buffer.byteLength(content!, 'utf-8'),
-    });
-  }));
+  router.put('/:id/claude-files', validateParams(projectIdSchema), validateBody(saveClaudeFileSchema), projectExistsMiddleware, asyncHandler(handleSaveClaudeFile()));
 
   // Get project Docker override with effective state
   router.get('/:id/docker', validateParams(projectIdSchema), projectExistsMiddleware, asyncHandler(async (req: Request, res: Response): Promise<void> => {
