@@ -96,38 +96,10 @@ export class DefaultRunConfigurationService implements RunConfigurationService {
       return null;
     }
 
-    if (data.name !== undefined) {
-      this.validateUniqueName(configs, data.name, configId);
-    }
-
-    if (data.command !== undefined) {
-      this.validateCommand(data.command);
-    }
-
-    if (data.cwd !== undefined) {
-      this.validateCwd(data.cwd);
-    }
-
-    if (data.preLaunchConfigId !== undefined && data.preLaunchConfigId !== null) {
-      this.validatePreLaunchExists(configs, data.preLaunchConfigId);
-      this.detectCycle(configs, configId, data.preLaunchConfigId);
-    }
+    this.validateUpdateData(configs, configId, data);
 
     const existing = configs[index]!;
-    const updated: RunConfiguration = {
-      ...existing,
-      name: data.name !== undefined ? data.name.trim() : existing.name,
-      command: data.command !== undefined ? data.command.trim() : existing.command,
-      args: data.args !== undefined ? data.args : existing.args,
-      cwd: data.cwd !== undefined ? data.cwd : existing.cwd,
-      env: data.env !== undefined ? data.env : existing.env,
-      shell: data.shell !== undefined ? data.shell : existing.shell,
-      autoRestart: data.autoRestart !== undefined ? data.autoRestart : existing.autoRestart,
-      autoRestartDelay: data.autoRestartDelay !== undefined ? data.autoRestartDelay : existing.autoRestartDelay,
-      autoRestartMaxRetries: data.autoRestartMaxRetries !== undefined ? data.autoRestartMaxRetries : existing.autoRestartMaxRetries,
-      preLaunchConfigId: data.preLaunchConfigId !== undefined ? data.preLaunchConfigId : existing.preLaunchConfigId,
-      updatedAt: new Date().toISOString(),
-    };
+    const updated: RunConfiguration = mergeConfigFields(existing, data);
 
     const newConfigs = [...configs];
     newConfigs[index] = updated;
@@ -165,6 +137,29 @@ export class DefaultRunConfigurationService implements RunConfigurationService {
     await this.projectRepository.updateRunConfigurations(projectId, filtered);
 
     return true;
+  }
+
+  private validateUpdateData(
+    configs: RunConfiguration[],
+    configId: string,
+    data: UpdateRunConfigData,
+  ): void {
+    if (data.name !== undefined) {
+      this.validateUniqueName(configs, data.name, configId);
+    }
+
+    if (data.command !== undefined) {
+      this.validateCommand(data.command);
+    }
+
+    if (data.cwd !== undefined) {
+      this.validateCwd(data.cwd);
+    }
+
+    if (data.preLaunchConfigId !== undefined && data.preLaunchConfigId !== null) {
+      this.validatePreLaunchExists(configs, data.preLaunchConfigId);
+      this.detectCycle(configs, configId, data.preLaunchConfigId);
+    }
   }
 
   private validateUniqueName(
@@ -240,4 +235,21 @@ export class DefaultRunConfigurationService implements RunConfigurationService {
       currentId = config?.preLaunchConfigId || null;
     }
   }
+}
+
+function mergeConfigFields(existing: RunConfiguration, data: UpdateRunConfigData): RunConfiguration {
+  return {
+    ...existing,
+    name: data.name !== undefined ? data.name.trim() : existing.name,
+    command: data.command !== undefined ? data.command.trim() : existing.command,
+    args: data.args !== undefined ? data.args : existing.args,
+    cwd: data.cwd !== undefined ? data.cwd : existing.cwd,
+    env: data.env !== undefined ? data.env : existing.env,
+    shell: data.shell !== undefined ? data.shell : existing.shell,
+    autoRestart: data.autoRestart !== undefined ? data.autoRestart : existing.autoRestart,
+    autoRestartDelay: data.autoRestartDelay !== undefined ? data.autoRestartDelay : existing.autoRestartDelay,
+    autoRestartMaxRetries: data.autoRestartMaxRetries !== undefined ? data.autoRestartMaxRetries : existing.autoRestartMaxRetries,
+    preLaunchConfigId: data.preLaunchConfigId !== undefined ? data.preLaunchConfigId : existing.preLaunchConfigId,
+    updatedAt: new Date().toISOString(),
+  };
 }
