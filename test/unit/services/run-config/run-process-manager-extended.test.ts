@@ -224,6 +224,7 @@ describe('DefaultRunProcessManager - Extended Coverage', () => {
         preLaunchConfigId: 'pre-launch-1',
       };
 
+      // eslint-disable-next-line @typescript-eslint/require-await
       mockConfigService.getById.mockImplementation(async (_pid, cid) => {
         if (cid === 'pre-launch-1') return preLaunchConfig;
         return mainConfig;
@@ -247,6 +248,7 @@ describe('DefaultRunProcessManager - Extended Coverage', () => {
         preLaunchConfigId: 'missing-config',
       };
 
+      // eslint-disable-next-line @typescript-eslint/require-await
       mockConfigService.getById.mockImplementation(async (_pid, cid) => {
         if (cid === 'missing-config') return null;
         return mainConfig;

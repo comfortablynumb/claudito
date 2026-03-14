@@ -12,7 +12,6 @@ import {
   createMockGitService,
   createMockInstructionGenerator,
   sampleProject,
-  DEFAULT_TEST_SETTINGS,
 } from '../../helpers/mock-factories';
 import { createProjectsRouter, ProjectRouterDependencies } from '../../../../src/routes/projects';
 import { createErrorHandler } from '../../../../src/utils';
@@ -56,8 +55,6 @@ jest.mock('../../../../src/routes', () => ({
   getRalphLoopService: jest.fn(() => mockRalphLoopService),
 }));
 
-import fs from 'fs';
-
 // ============================================================================
 // Test Helpers
 // ============================================================================
@@ -87,7 +84,6 @@ function buildDeps(overrides?: Partial<ProjectRouterDependencies>): ProjectRoute
 }
 
 const PROJECT_ID = sampleProject.id;
-const PROJECT_PATH = sampleProject.path;
 
 // ============================================================================
 // GET /:id/docker

@@ -224,9 +224,7 @@ describe('ProcessTracker', () => {
         { projectId: 'proj-stub', pid: 77777 },
       ]);
 
-      let killCount = 0;
       const killSpy = jest.spyOn(process, 'kill').mockImplementation((_pid, signal) => {
-        killCount++;
         // signal 0 checks: process is always running (never throws)
         if (signal === 0) return true;
         // SIGTERM: ok but process stays alive

@@ -748,7 +748,7 @@ describe('DefaultRalphLoopService', () => {
       const allLoops = await serviceWithMcp.listByProject('test-project');
       for (const loop of allLoops) {
         if (loop.status === 'worker_running' || loop.status === 'reviewer_running') {
-          try { await serviceWithMcp.stop('test-project', loop.taskId); } catch {}
+          try { await serviceWithMcp.stop('test-project', loop.taskId); } catch { /* no-op */ }
         }
       }
     });
@@ -793,7 +793,7 @@ describe('DefaultRalphLoopService', () => {
       const allLoops = await serviceWithMcp.listByProject('test-project');
       for (const loop of allLoops) {
         if (loop.status === 'worker_running' || loop.status === 'reviewer_running') {
-          try { await serviceWithMcp.stop('test-project', loop.taskId); } catch {}
+          try { await serviceWithMcp.stop('test-project', loop.taskId); } catch { /* no-op */ }
         }
       }
     });
@@ -843,7 +843,7 @@ describe('DefaultRalphLoopService', () => {
       const allLoops = await serviceWithSettings.listByProject('test-project');
       for (const loop of allLoops) {
         if (loop.status === 'worker_running' || loop.status === 'reviewer_running') {
-          try { await serviceWithSettings.stop('test-project', loop.taskId); } catch {}
+          try { await serviceWithSettings.stop('test-project', loop.taskId); } catch { /* no-op */ }
         }
       }
     });
@@ -889,7 +889,7 @@ describe('DefaultRalphLoopService', () => {
       const allLoops = await serviceWithSettings.listByProject('test-project');
       for (const loop of allLoops) {
         if (loop.status === 'worker_running' || loop.status === 'reviewer_running') {
-          try { await serviceWithSettings.stop('test-project', loop.taskId); } catch {}
+          try { await serviceWithSettings.stop('test-project', loop.taskId); } catch { /* no-op */ }
         }
       }
     });

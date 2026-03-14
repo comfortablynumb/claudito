@@ -26,7 +26,8 @@ function createMockStreamResult(text: string) {
 
 function createErrorStreamResult(error: Error) {
   return {
-    textStream: (async function* () {
+    // eslint-disable-next-line require-yield
+    textStream: (function* () {
       throw error;
     })(),
   } as unknown as ReturnType<typeof streamText>;
@@ -167,7 +168,8 @@ describe('AnthropicSdkAgent - Coverage', () => {
 
     it('should handle non-Error throws', async () => {
       const result = {
-        textStream: (async function* () {
+        // eslint-disable-next-line require-yield
+        textStream: (function* () {
           throw 'string error';
         })(),
       } as unknown as ReturnType<typeof streamText>;
@@ -212,7 +214,7 @@ describe('AnthropicSdkAgent - Coverage', () => {
   describe('collectedOutput', () => {
     it('should accumulate streamed text in collectedOutput', async () => {
       const multiChunkResult = {
-        textStream: (async function* () {
+        textStream: (function* () {
           yield 'chunk1';
           yield 'chunk2';
         })(),

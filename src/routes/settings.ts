@@ -171,7 +171,8 @@ function buildSlackPayload(slack: Partial<SlackSettings> | undefined): Partial<S
 }
 
 function buildUpdatePayload(body: UpdateSettingsBody): Omit<UpdateSettingsBody, 'slack'> {
-  const { slack: _slack, ...rest } = body;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { slack: _, ...rest } = body;
   return rest;
 }
 

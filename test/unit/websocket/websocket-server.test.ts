@@ -1379,7 +1379,6 @@ describe('DefaultWebSocketServer', () => {
       wsServer.initialize({} as Server);
 
       const { WebSocketServer: MockWebSocketServer } = jest.requireMock('ws');
-      const mockWssInstance = MockWebSocketServer.mock.results[0].value;
       const verifyClientFn = MockWebSocketServer.mock.calls[0][0].verifyClient;
 
       const callback = jest.fn();

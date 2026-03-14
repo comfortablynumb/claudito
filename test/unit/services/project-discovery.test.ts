@@ -293,8 +293,6 @@ describe('DefaultProjectDiscoveryService', () => {
     });
 
     it('returns null and logs error when repository.create throws', async () => {
-      const projectPath = path.join(DEV_DIR, 'my-app');
-
       mockExistsSync.mockImplementation(p => p === DEV_DIR);
       mockReaddir.mockResolvedValue([makeDirent('my-app', true)]);
       mockGenerateIdFromPath.mockReturnValue('my_app_id');

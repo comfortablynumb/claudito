@@ -581,7 +581,7 @@ describe('DefaultSlackSocketService event listeners', () => {
     const mockAck = jest.fn().mockResolvedValue(undefined);
     const mockBody = { command: '/test', text: 'hello' };
 
-    await slashHandler!({ body: mockBody, ack: mockAck });
+    slashHandler!({ body: mockBody, ack: mockAck });
 
     // Wait for the async IIFE
     await new Promise(resolve => setTimeout(resolve, 10));
@@ -598,7 +598,7 @@ describe('DefaultSlackSocketService event listeners', () => {
     expect(slashHandler).toBeDefined();
 
     const mockAck = jest.fn().mockResolvedValue(undefined);
-    await slashHandler!({ body: { command: '/test' }, ack: mockAck });
+    slashHandler!({ body: { command: '/test' }, ack: mockAck });
 
     await new Promise(resolve => setTimeout(resolve, 10));
 
@@ -618,7 +618,7 @@ describe('DefaultSlackSocketService event listeners', () => {
     const mockAck = jest.fn().mockResolvedValue(undefined);
     const mockBody = { type: 'block_actions', actions: [] };
 
-    await interactiveHandler!({ body: mockBody, ack: mockAck });
+    interactiveHandler!({ body: mockBody, ack: mockAck });
 
     await new Promise(resolve => setTimeout(resolve, 10));
 
@@ -634,7 +634,7 @@ describe('DefaultSlackSocketService event listeners', () => {
     expect(interactiveHandler).toBeDefined();
 
     const mockAck = jest.fn().mockResolvedValue(undefined);
-    await interactiveHandler!({ body: {}, ack: mockAck });
+    interactiveHandler!({ body: {}, ack: mockAck });
 
     await new Promise(resolve => setTimeout(resolve, 10));
 
@@ -654,7 +654,7 @@ describe('DefaultSlackSocketService event listeners', () => {
     const mockAck = jest.fn().mockResolvedValue(undefined);
     const mockEvent = { type: 'message', text: 'hello', user: 'U123' };
 
-    await messageHandler!({ event: mockEvent, ack: mockAck });
+    messageHandler!({ event: mockEvent, ack: mockAck });
 
     await new Promise(resolve => setTimeout(resolve, 10));
 
@@ -670,7 +670,7 @@ describe('DefaultSlackSocketService event listeners', () => {
     expect(messageHandler).toBeDefined();
 
     const mockAck = jest.fn().mockResolvedValue(undefined);
-    await messageHandler!({ event: { type: 'message' }, ack: mockAck });
+    messageHandler!({ event: { type: 'message' }, ack: mockAck });
 
     await new Promise(resolve => setTimeout(resolve, 10));
 

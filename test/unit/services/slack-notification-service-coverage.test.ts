@@ -298,6 +298,7 @@ describe('SlackNotificationService - linked channel milestone', () => {
 
     // Make replyInThread fail on second call (first is for project notification threading)
     let callCount = 0;
+    // eslint-disable-next-line @typescript-eslint/require-await
     deps.slackService.replyInThread.mockImplementation(async () => {
       callCount++;
       if (callCount >= 1) throw new Error('Slack API error');

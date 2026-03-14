@@ -219,6 +219,7 @@ describe('Git Routes - Extended', () => {
         untracked: [],
       });
       mockGitService.getDiff.mockResolvedValue('diff content here');
+      // eslint-disable-next-line @typescript-eslint/require-await
       mockAgentManager.startOneOffAgent.mockImplementation(async () => {
         const oneOffId = 'oneoff-commit-123';
 
@@ -249,6 +250,7 @@ describe('Git Routes - Extended', () => {
         untracked: [],
       });
       mockGitService.getDiff.mockResolvedValue('diff');
+      // eslint-disable-next-line @typescript-eslint/require-await
       mockAgentManager.startOneOffAgent.mockImplementation(async () => {
         const oneOffId = 'oneoff-commit-456';
 
@@ -278,6 +280,7 @@ describe('Git Routes - Extended', () => {
         untracked: [],
       });
       mockGitService.getDiff.mockResolvedValue('diff');
+      // eslint-disable-next-line @typescript-eslint/require-await
       mockAgentManager.startOneOffAgent.mockImplementation(async () => {
         const oneOffId = 'oneoff-commit-789';
 
@@ -307,6 +310,7 @@ describe('Git Routes - Extended', () => {
         untracked: [],
       });
       mockGitService.getDiff.mockResolvedValue('diff');
+      // eslint-disable-next-line @typescript-eslint/require-await
       mockAgentManager.startOneOffAgent.mockImplementation(async () => {
         const oneOffId = 'oneoff-waiting';
 
@@ -337,6 +341,7 @@ describe('Git Routes - Extended', () => {
         untracked: [],
       });
       mockGitService.getDiff.mockResolvedValue('diff');
+      // eslint-disable-next-line @typescript-eslint/require-await
       mockAgentManager.startOneOffAgent.mockImplementation(async () => {
         const oneOffId = 'oneoff-error';
 
@@ -362,6 +367,7 @@ describe('Git Routes - Extended', () => {
         untracked: [],
       });
       mockGitService.getDiff.mockResolvedValue('diff');
+      // eslint-disable-next-line @typescript-eslint/require-await
       mockAgentManager.startOneOffAgent.mockImplementation(async () => {
         const oneOffId = 'oneoff-multi';
 
@@ -395,6 +401,7 @@ describe('Git Routes - Extended', () => {
         untracked: [],
       });
       mockGitService.getDiff.mockResolvedValue('diff');
+      // eslint-disable-next-line @typescript-eslint/require-await
       mockAgentManager.startOneOffAgent.mockImplementation(async () => {
         const oneOffId = 'oneoff-mine';
 
@@ -451,6 +458,7 @@ describe('Git Routes - Extended', () => {
       mockGitService.getDiff.mockResolvedValue('diff content');
       mockConversationRepo.getMessagesLegacy.mockResolvedValue([]);
 
+      // eslint-disable-next-line @typescript-eslint/require-await
       mockAgentManager.startOneOffAgent.mockImplementation(async () => {
         const oneOffId = 'oneoff-pr-123';
 
@@ -485,6 +493,7 @@ describe('Git Routes - Extended', () => {
       mockGitService.getDiff.mockResolvedValue('some diff');
       mockConversationRepo.getMessagesLegacy.mockResolvedValue([]);
 
+      // eslint-disable-next-line @typescript-eslint/require-await
       mockAgentManager.startOneOffAgent.mockImplementation(async () => {
         const oneOffId = 'oneoff-pr-fence';
 
@@ -517,6 +526,7 @@ describe('Git Routes - Extended', () => {
       mockGitService.getDiff.mockResolvedValue('diff');
       mockConversationRepo.getMessagesLegacy.mockResolvedValue([]);
 
+      // eslint-disable-next-line @typescript-eslint/require-await
       mockAgentManager.startOneOffAgent.mockImplementation(async () => {
         const oneOffId = 'oneoff-pr-text';
 
@@ -551,6 +561,7 @@ describe('Git Routes - Extended', () => {
         { type: 'stdout', content: 'Done', timestamp: new Date().toISOString() },
       ]);
 
+      // eslint-disable-next-line @typescript-eslint/require-await
       mockAgentManager.startOneOffAgent.mockImplementation(async (opts) => {
         const oneOffId = 'oneoff-pr-ctx';
 
@@ -584,6 +595,7 @@ describe('Git Routes - Extended', () => {
       mockGitService.getDiff.mockResolvedValue('diff');
       mockConversationRepo.getMessagesLegacy.mockResolvedValue([]);
 
+      // eslint-disable-next-line @typescript-eslint/require-await
       mockAgentManager.startOneOffAgent.mockImplementation(async () => {
         const oneOffId = 'oneoff-pr-err';
 
@@ -611,6 +623,7 @@ describe('Git Routes - Extended', () => {
       mockGitService.getDiff.mockResolvedValueOnce('staged changes');
       mockConversationRepo.getMessagesLegacy.mockResolvedValue([]);
 
+      // eslint-disable-next-line @typescript-eslint/require-await
       mockAgentManager.startOneOffAgent.mockImplementation(async () => {
         const oneOffId = 'oneoff-pr-main';
 
@@ -647,6 +660,7 @@ describe('Git Routes - Extended', () => {
         { type: 'stdout', content: longContent, timestamp: new Date().toISOString() },
       ]);
 
+      // eslint-disable-next-line @typescript-eslint/require-await
       mockAgentManager.startOneOffAgent.mockImplementation(async (opts) => {
         const oneOffId = 'oneoff-pr-long';
 
@@ -689,6 +703,7 @@ describe('Git Routes - Extended', () => {
       mockGitService.getDiff.mockResolvedValue('diff content');
       mockConversationRepo.getMessagesLegacy.mockResolvedValue([]);
 
+      // eslint-disable-next-line @typescript-eslint/require-await
       mockAgentManager.startOneOffAgent.mockImplementation(async () => {
         const oneOffId = 'oneoff-pr-master';
 
@@ -718,6 +733,7 @@ describe('Git Routes - Extended', () => {
       mockGitService.getDiff.mockResolvedValue('diff');
       mockConversationRepo.getMessagesLegacy.mockResolvedValue([]);
 
+      // eslint-disable-next-line @typescript-eslint/require-await
       mockAgentManager.startOneOffAgent.mockImplementation(async () => {
         const oneOffId = 'oneoff-pr-notitle';
 

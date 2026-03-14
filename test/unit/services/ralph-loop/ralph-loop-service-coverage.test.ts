@@ -22,7 +22,6 @@ import {
 } from '../../../../src/services/ralph-loop/types';
 import {
   WorkerAgent,
-  WorkerAgentConfig,
   WorkerStatus,
   WorkerAgentEvents,
 } from '../../../../src/services/ralph-loop/worker-agent';
@@ -71,7 +70,7 @@ class MockWorkerAgent {
     });
   }
 
-  async stop(): Promise<void> { return this.stopFn(); }
+  stop(): Promise<void> { return this.stopFn(); }
 
   on<K extends keyof WorkerAgentEvents>(event: K, listener: WorkerAgentEvents[K]): void {
     this.emitter.on(event, listener);
@@ -109,7 +108,7 @@ class MockReviewerAgent {
     });
   }
 
-  async stop(): Promise<void> { return this.stopFn(); }
+  stop(): Promise<void> { return this.stopFn(); }
 
   on<K extends keyof ReviewerAgentEvents>(event: K, listener: ReviewerAgentEvents[K]): void {
     this.emitter.on(event, listener);
@@ -257,7 +256,7 @@ describe('DefaultRalphLoopService - additional coverage', () => {
       mockReviewerAgentFactory.create = jest.fn().mockImplementation(() => {
         const agent = new MockReviewerAgent();
         reviewerStopFn = agent.stopFn;
-        agent.runFn = async () => {
+        agent.runFn = () => {
           return new Promise<ReviewerFeedback>((resolve) => {
             setTimeout(() => resolve({
               iterationNumber: 1,
@@ -318,6 +317,7 @@ describe('DefaultRalphLoopService - additional coverage', () => {
       // Reviewer approves immediately
       mockReviewerAgentFactory.create = jest.fn().mockImplementation(() => {
         const agent = new MockReviewerAgent();
+        // eslint-disable-next-line @typescript-eslint/require-await
         agent.runFn = async (state) => ({
           iterationNumber: state.currentIteration,
           timestamp: new Date().toISOString(),
@@ -356,8 +356,9 @@ describe('DefaultRalphLoopService - additional coverage', () => {
       const service = createService({ settingsRepository: mockSettingsRepo });
 
       // Make reviewer approve immediately
-      mockReviewerAgentFactory.create = jest.fn().mockImplementation((config: ReviewerAgentConfig) => {
+      mockReviewerAgentFactory.create = jest.fn().mockImplementation((_config: ReviewerAgentConfig) => {
         const agent = new MockReviewerAgent();
+        // eslint-disable-next-line @typescript-eslint/require-await
         agent.runFn = async (state) => ({
           iterationNumber: state.currentIteration,
           timestamp: new Date().toISOString(),
@@ -509,7 +510,7 @@ describe('DefaultRalphLoopService - additional coverage', () => {
       let resolveReviewer: ((f: ReviewerFeedback) => void) | undefined;
       mockReviewerAgentFactory.create = jest.fn().mockImplementation(() => {
         const agent = new MockReviewerAgent();
-        agent.runFn = async (state) => {
+        agent.runFn = (_state: RalphLoopState) => {
           return new Promise<ReviewerFeedback>((resolve) => {
             resolveReviewer = resolve;
           });
@@ -552,6 +553,7 @@ describe('DefaultRalphLoopService - additional coverage', () => {
 
       // First call to create returns state, subsequent findById returns null
       let callCount = 0;
+      // eslint-disable-next-line @typescript-eslint/require-await
       mockRepository.findById.mockImplementation(async () => {
         callCount++;
         if (callCount <= 2) {
@@ -576,6 +578,7 @@ describe('DefaultRalphLoopService - additional coverage', () => {
       // Worker completes but we stop before reviewer can validate
       mockWorkerAgentFactory.create = jest.fn().mockImplementation(() => {
         const agent = new MockWorkerAgent();
+        // eslint-disable-next-line @typescript-eslint/require-await
         agent.runFn = async (state) => {
           return {
             iterationNumber: state.currentIteration,
@@ -614,7 +617,7 @@ describe('DefaultRalphLoopService - additional coverage', () => {
       mockWorkerAgentFactory.create = jest.fn().mockImplementation(() => {
         workerCreated++;
         const agent = new MockWorkerAgent();
-        agent.runFn = async (state) => {
+        agent.runFn = (_state: RalphLoopState) => {
           return new Promise<IterationSummary>((resolve) => {
             resolveWorker = resolve;
           });
@@ -728,6 +731,7 @@ describe('DefaultRalphLoopService - additional coverage', () => {
       // Worker throws an Error
       mockWorkerAgentFactory.create = jest.fn().mockImplementation(() => {
         const agent = new MockWorkerAgent();
+        // eslint-disable-next-line @typescript-eslint/require-await
         agent.runFn = async () => {
           throw new Error('Agent crashed');
         };
@@ -763,6 +767,7 @@ describe('DefaultRalphLoopService - additional coverage', () => {
 
       mockReviewerAgentFactory.create = jest.fn().mockImplementation(() => {
         const agent = new MockReviewerAgent();
+        // eslint-disable-next-line @typescript-eslint/require-await
         agent.runFn = async (state) => ({
           iterationNumber: state.currentIteration,
           timestamp: new Date().toISOString(),
@@ -814,6 +819,7 @@ describe('DefaultRalphLoopService - additional coverage', () => {
       const service = createService();
 
       const config = createTestRalphLoopConfig({ maxTurns: 1 });
+      // eslint-disable-next-line @typescript-eslint/require-await
       mockRepository.findById.mockImplementation(async () =>
         createTestRalphLoopState({ currentIteration: 1, config })
       );
@@ -830,6 +836,7 @@ describe('DefaultRalphLoopService - additional coverage', () => {
 
       mockReviewerAgentFactory.create = jest.fn().mockImplementation(() => {
         const agent = new MockReviewerAgent();
+        // eslint-disable-next-line @typescript-eslint/require-await
         agent.runFn = async (state) => ({
           iterationNumber: state.currentIteration,
           timestamp: new Date().toISOString(),
@@ -1027,6 +1034,7 @@ describe('DefaultRalphLoopService - additional coverage', () => {
 
       mockWorkerAgentFactory.create = jest.fn().mockImplementation(() => {
         const agent = new MockWorkerAgent();
+        // eslint-disable-next-line @typescript-eslint/require-await
         agent.runFn = async () => {
           throw 'string error thrown';
         };
@@ -1089,6 +1097,7 @@ describe('DefaultRalphLoopService - additional coverage', () => {
 
       mockReviewerAgentFactory.create = jest.fn().mockImplementation(() => {
         const agent = new MockReviewerAgent();
+        // eslint-disable-next-line @typescript-eslint/require-await
         agent.runFn = async (state) => ({
           iterationNumber: state.currentIteration,
           timestamp: new Date().toISOString(),
@@ -1154,11 +1163,11 @@ describe('DefaultRalphLoopService - additional coverage', () => {
       const service = createService();
 
       // Worker completes but we pause right after
-      let workerDone = false;
       mockWorkerAgentFactory.create = jest.fn().mockImplementation(() => {
         const agent = new MockWorkerAgent();
+        // eslint-disable-next-line @typescript-eslint/require-await
         agent.runFn = async (state) => {
-          const summary: IterationSummary = {
+          return {
             iterationNumber: state.currentIteration,
             timestamp: new Date().toISOString(),
             workerOutput: 'Done',
@@ -1166,8 +1175,6 @@ describe('DefaultRalphLoopService - additional coverage', () => {
             tokensUsed: 100,
             durationMs: 5,
           };
-          workerDone = true;
-          return summary;
         };
         lastWorkerAgent = agent;
         return agent as unknown as WorkerAgent;

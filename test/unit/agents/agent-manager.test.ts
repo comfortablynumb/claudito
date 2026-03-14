@@ -3197,6 +3197,7 @@ describe('DefaultAgentManager', () => {
       const project2 = createTestProject({ id: 'project-2', path: '/test/path2' });
       const project3 = createTestProject({ id: 'project-3', path: '/test/path3' });
       const project4 = createTestProject({ id: 'project-4', path: '/test/path4' });
+      // eslint-disable-next-line @typescript-eslint/require-await
       mockProjectRepo.findById.mockImplementation(async (id: string) => {
         const map: Record<string, ReturnType<typeof createTestProject>> = {
           'test-project': testProject,
@@ -3236,7 +3237,7 @@ describe('DefaultAgentManager', () => {
       expect(exitCall).toBeDefined();
       const exitCallback = exitCall![1] as (code: number | null) => void;
 
-      await exitCallback(0);
+      exitCallback(0);
 
       // Give async processQueue a tick
       await new Promise((resolve) => setTimeout(resolve, 50));

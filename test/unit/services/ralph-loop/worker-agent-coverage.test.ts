@@ -15,7 +15,6 @@ jest.mock('../../../../src/agents/message-builder', () => ({
   },
 }));
 
-import { spawn, execFile } from 'child_process';
 import * as fs from 'fs';
 
 import { WorkerAgent } from '../../../../src/services/ralph-loop/worker-agent';
@@ -25,7 +24,6 @@ import {
   createTestRalphLoopState,
 } from '../../helpers/mock-factories';
 
-const mockedExecFile = execFile as unknown as jest.Mock;
 const mockedUnlinkSync = fs.unlinkSync as jest.Mock;
 const mockedGenerateMcpConfig = MessageBuilder.generateMcpConfig as jest.Mock;
 

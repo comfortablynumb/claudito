@@ -1,4 +1,3 @@
-import { EventEmitter } from 'events';
 import { ChildProcess } from 'child_process';
 import { OpencodeAgent, OpencodeAgentConfig } from '../../../src/agents/opencode-agent';
 import { createMockChildProcess, createMockProcessSpawner, MockChildProcess } from '../helpers/mock-factories';

@@ -5,7 +5,7 @@ import {
   AgentFactory,
   AgentFactoryOptions,
 } from '../../../src/agents/agent-manager';
-import { Agent, AgentMessage, AgentStatus, ProcessInfo, ContextUsage, AgentEvents } from '../../../src/agents/agent';
+import { Agent, AgentMessage, AgentStatus, ProcessInfo, ContextUsage } from '../../../src/agents/agent';
 import {
   createMockProjectRepository,
   createMockConversationRepository,
@@ -190,7 +190,7 @@ describe('DefaultAgentManager - additional coverage', () => {
 
   describe('getLastCommand', () => {
     it('returns lastCommand from running agent', async () => {
-      const { manager, agents } = buildManager();
+      const { manager } = buildManager();
       await startInteractive(manager);
 
       expect(manager.getLastCommand('proj-1')).toBe('claude --some-args');
@@ -253,7 +253,7 @@ describe('DefaultAgentManager - additional coverage', () => {
 
   describe('getSessionId', () => {
     it('returns sessionId from running agent', async () => {
-      const { manager, agents } = buildManager();
+      const { manager } = buildManager();
       await startInteractive(manager);
 
       // The sessionId is set during agent creation
@@ -406,6 +406,7 @@ describe('DefaultAgentManager - additional coverage', () => {
         id: 'proj-2', path: '/test/proj-2',
         currentConversationId: 'conv-2',
       });
+      // eslint-disable-next-line @typescript-eslint/require-await
       projectRepo.findById = jest.fn().mockImplementation(async (id: string) => {
         if (id === 'proj-1') return createTestProject({ id: 'proj-1', path: '/test/proj-1' });
         if (id === 'proj-2') return proj2;
@@ -441,6 +442,7 @@ describe('DefaultAgentManager - additional coverage', () => {
       const { manager, projectRepo } = buildManager({ maxConcurrentAgents: 1 });
 
       const proj2 = createTestProject({ id: 'proj-2', path: '/test/proj-2' });
+      // eslint-disable-next-line @typescript-eslint/require-await
       projectRepo.findById = jest.fn().mockImplementation(async (id: string) => {
         if (id === 'proj-1') return createTestProject({ id: 'proj-1', path: '/test/proj-1' });
         if (id === 'proj-2') return proj2;
@@ -463,6 +465,7 @@ describe('DefaultAgentManager - additional coverage', () => {
         id: 'proj-2', path: '/test/proj-2',
         currentConversationId: 'conv-2',
       });
+      // eslint-disable-next-line @typescript-eslint/require-await
       projectRepo.findById = jest.fn().mockImplementation(async (id: string) => {
         if (id === 'proj-1') return createTestProject({ id: 'proj-1', path: '/test/proj-1' });
         if (id === 'proj-2') return proj2;
@@ -583,7 +586,7 @@ describe('DefaultAgentManager - additional coverage', () => {
 
   describe('handleStatusChange emits status event', () => {
     it('emits status event on status change', async () => {
-      const { manager, agents } = buildManager();
+      const { manager } = buildManager();
       const statusEvents: Array<{ projectId: string; status: AgentStatus }> = [];
 
       manager.on('status', (projectId, status) => {
@@ -601,12 +604,13 @@ describe('DefaultAgentManager - additional coverage', () => {
 
   describe('processQueue', () => {
     it('starts queued agent after slot opens', async () => {
-      const { manager, projectRepo, agents } = buildManager({ maxConcurrentAgents: 1 });
+      const { manager, projectRepo } = buildManager({ maxConcurrentAgents: 1 });
 
       const proj2 = createTestProject({
         id: 'proj-2', path: '/test/proj-2',
         currentConversationId: 'conv-2',
       });
+      // eslint-disable-next-line @typescript-eslint/require-await
       projectRepo.findById = jest.fn().mockImplementation(async (id: string) => {
         if (id === 'proj-1') return createTestProject({ id: 'proj-1', path: '/test/proj-1' });
         if (id === 'proj-2') return proj2;

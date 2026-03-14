@@ -3,7 +3,6 @@ import { ChildProcess, execFile } from 'child_process';
 import {
   ProcessManager,
   ProcessSpawner,
-  SpawnOptions,
 } from '../../../src/agents/process-manager';
 import { Logger } from '../../../src/utils';
 
