@@ -237,19 +237,23 @@ export class DefaultRunConfigurationService implements RunConfigurationService {
   }
 }
 
+function pickDefined<T>(updated: T | undefined, existing: T): T {
+  return updated !== undefined ? updated : existing;
+}
+
 function mergeConfigFields(existing: RunConfiguration, data: UpdateRunConfigData): RunConfiguration {
   return {
     ...existing,
     name: data.name !== undefined ? data.name.trim() : existing.name,
     command: data.command !== undefined ? data.command.trim() : existing.command,
-    args: data.args !== undefined ? data.args : existing.args,
-    cwd: data.cwd !== undefined ? data.cwd : existing.cwd,
-    env: data.env !== undefined ? data.env : existing.env,
-    shell: data.shell !== undefined ? data.shell : existing.shell,
-    autoRestart: data.autoRestart !== undefined ? data.autoRestart : existing.autoRestart,
-    autoRestartDelay: data.autoRestartDelay !== undefined ? data.autoRestartDelay : existing.autoRestartDelay,
-    autoRestartMaxRetries: data.autoRestartMaxRetries !== undefined ? data.autoRestartMaxRetries : existing.autoRestartMaxRetries,
-    preLaunchConfigId: data.preLaunchConfigId !== undefined ? data.preLaunchConfigId : existing.preLaunchConfigId,
+    args: pickDefined(data.args, existing.args),
+    cwd: pickDefined(data.cwd, existing.cwd),
+    env: pickDefined(data.env, existing.env),
+    shell: pickDefined(data.shell, existing.shell),
+    autoRestart: pickDefined(data.autoRestart, existing.autoRestart),
+    autoRestartDelay: pickDefined(data.autoRestartDelay, existing.autoRestartDelay),
+    autoRestartMaxRetries: pickDefined(data.autoRestartMaxRetries, existing.autoRestartMaxRetries),
+    preLaunchConfigId: pickDefined(data.preLaunchConfigId, existing.preLaunchConfigId),
     updatedAt: new Date().toISOString(),
   };
 }

@@ -10,6 +10,18 @@ export interface ProjectDiscoveryService {
   scanForProjects(searchPath: string, maxDepth?: number): Promise<string[]>;
 }
 
+const SKIPPED_DIRECTORIES = new Set([
+  'node_modules',
+  '__pycache__',
+  'target',
+  'dist',
+  'build',
+]);
+
+function isSkippedDirectory(name: string): boolean {
+  return name.startsWith('.') || SKIPPED_DIRECTORIES.has(name);
+}
+
 export class DefaultProjectDiscoveryService implements ProjectDiscoveryService {
   private readonly logger: Logger;
 
@@ -78,13 +90,7 @@ export class DefaultProjectDiscoveryService implements ProjectDiscoveryService {
 
           const fullPath = path.join(dir, entry.name);
 
-          // Skip hidden directories and common non-project folders
-          if (entry.name.startsWith('.') ||
-              entry.name === 'node_modules' ||
-              entry.name === '__pycache__' ||
-              entry.name === 'target' ||
-              entry.name === 'dist' ||
-              entry.name === 'build') {
+          if (isSkippedDirectory(entry.name)) {
             continue;
           }
 
