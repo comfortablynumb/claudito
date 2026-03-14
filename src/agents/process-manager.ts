@@ -4,8 +4,6 @@ import { execFile } from 'child_process';
 import { Logger } from '../utils';
 import { ProcessInfo as ProcessInfoType } from './types';
 
-const isWindows = process.platform === 'win32';
-
 export interface ProcessSpawner {
   spawn(command: string, args: string[], options: SpawnOptions): ChildProcess;
 }
@@ -46,12 +44,15 @@ export class ProcessManager extends EventEmitter {
   private process: ChildProcess | null = null;
   private processInfo: ProcessInfo | null = null;
   private isShuttingDown = false;
+  private readonly isWindows: boolean;
 
   constructor(
     private readonly logger: Logger,
-    private readonly spawner: ProcessSpawner = defaultSpawner
+    private readonly spawner: ProcessSpawner = defaultSpawner,
+    platform?: string
   ) {
     super();
+    this.isWindows = (platform ?? process.platform) === 'win32';
   }
 
   /**
@@ -151,7 +152,7 @@ export class ProcessManager extends EventEmitter {
     this.removeProcessListeners();
 
     try {
-      if (isWindows) {
+      if (this.isWindows) {
         await this.stopWindows(pid);
       } else {
         await this.stopUnix(pid);
@@ -178,7 +179,7 @@ export class ProcessManager extends EventEmitter {
     this.logger.warn('Force killing process', { pid });
 
     try {
-      if (isWindows) {
+      if (this.isWindows) {
         execFile('taskkill', ['/PID', String(pid), '/F', '/T'], (error) => {
           if (error) {
             this.logger.debug('Failed to force kill process tree', {
@@ -371,8 +372,8 @@ export class ProcessManager extends EventEmitter {
   /**
    * Kill a process by PID.
    */
-  static async killProcess(pid: number, signal: NodeJS.Signals = 'SIGTERM'): Promise<void> {
-    if (isWindows) {
+  static async killProcess(pid: number, signal: NodeJS.Signals = 'SIGTERM', platform?: string): Promise<void> {
+    if ((platform ?? process.platform) === 'win32') {
       return new Promise((resolve) => {
         // Always use /F on Windows as graceful shutdown often doesn't work
         const args = ['/PID', String(pid), '/F', '/T'];

@@ -466,6 +466,76 @@ describe('FileRalphLoopRepository', () => {
     });
   });
 
+  describe('delete', () => {
+    it('should return false for unknown project', async () => {
+      const result = await repository.delete('unknown-project', 'task-1');
+      expect(result).toBe(false);
+    });
+
+    it('should return false when rmdir throws', async () => {
+      const config = createTestRalphLoopConfig();
+
+      await repository.create({
+        taskId: 'task-err',
+        projectId: 'test-project',
+        config,
+        currentIteration: 0,
+        status: 'idle',
+        summaries: [],
+        feedback: [],
+      });
+
+      mockFileSystem.exists.mockResolvedValue(true);
+      mockFileSystem.rmdir.mockRejectedValueOnce(new Error('EACCES'));
+
+      const result = await repository.delete('test-project', 'task-err');
+      expect(result).toBe(false);
+    });
+  });
+
+  describe('findById - edge cases', () => {
+    it('should return null for unknown project', async () => {
+      const state = await repository.findById('unknown-project', 'task-1');
+      expect(state).toBeNull();
+    });
+
+    it('should return null when readFile throws', async () => {
+      mockFileSystem.exists.mockResolvedValue(true);
+      mockFileSystem.readFile.mockRejectedValueOnce(new Error('ENOENT'));
+
+      const newRepo = new FileRalphLoopRepository({
+        projectPathResolver: mockPathResolver,
+        fileSystem: mockFileSystem,
+      });
+
+      const state = await newRepo.findById('test-project', 'task-bad');
+      expect(state).toBeNull();
+    });
+  });
+
+  describe('findByProject - edge cases', () => {
+    it('should return empty for unknown project', async () => {
+      const states = await repository.findByProject('unknown-project');
+      expect(states).toEqual([]);
+    });
+  });
+
+  describe('addSummary - edge cases', () => {
+    it('should throw for unknown project task dir', async () => {
+      await expect(
+        repository.addSummary('unknown-project', 'task-1', createTestIterationSummary({ iterationNumber: 1 }))
+      ).rejects.toThrow('Task not found');
+    });
+  });
+
+  describe('addFeedback - edge cases', () => {
+    it('should throw for unknown project task dir', async () => {
+      await expect(
+        repository.addFeedback('unknown-project', 'task-1', createTestReviewerFeedback({ iterationNumber: 1 }))
+      ).rejects.toThrow('Task not found');
+    });
+  });
+
   describe('flush', () => {
     it('should wait for pending operations', async () => {
       const config = createTestRalphLoopConfig();

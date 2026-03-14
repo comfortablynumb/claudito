@@ -5,6 +5,7 @@ import {
   ValidationError,
   ConflictError,
   GitError,
+  GitHubCLIError,
   createErrorHandler,
   asyncHandler,
 } from '../../../src/utils/errors';
@@ -129,6 +130,28 @@ describe('Error Classes', () => {
       expect(error).toBeInstanceOf(AppError);
     });
   });
+
+  describe('GitHubCLIError', () => {
+    it('should create 500 error with message', () => {
+      const error = new GitHubCLIError('gh command failed');
+
+      expect(error.message).toBe('gh command failed');
+      expect(error.statusCode).toBe(500);
+      expect(error.code).toBe('GITHUB_CLI_ERROR');
+    });
+
+    it('should be an instance of AppError', () => {
+      const error = new GitHubCLIError('CLI error');
+
+      expect(error).toBeInstanceOf(AppError);
+    });
+
+    it('should be catchable as Error', () => {
+      const error = new GitHubCLIError('test');
+
+      expect(error).toBeInstanceOf(Error);
+    });
+  });
 });
 
 describe('Error Handler Middleware', () => {
@@ -220,6 +243,18 @@ describe('Error Handler Middleware', () => {
       expect(mockRes.json).toHaveBeenCalledWith({
         error: 'Git failed',
         code: 'GIT_ERROR',
+      });
+    });
+
+    it('should handle GitHubCLIError', () => {
+      const error = new GitHubCLIError('gh not installed');
+
+      handler(error, mockReq as Request, mockRes as Response, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(500);
+      expect(mockRes.json).toHaveBeenCalledWith({
+        error: 'gh not installed',
+        code: 'GITHUB_CLI_ERROR',
       });
     });
   });

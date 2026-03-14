@@ -464,6 +464,197 @@ describe('DefaultDockerService', () => {
       expect(args).toContain('label=claudito=true');
     });
   });
+
+  describe('getContainerStatus edge cases', () => {
+    it('should map dead state to stopped', async () => {
+      commandRunner.exec.mockResolvedValue({
+        stdout: JSON.stringify({
+          Id: 'abc123def456789',
+          State: { Status: 'dead' },
+          Config: { Image: 'test', Labels: {} },
+          Created: '2024-01-01T00:00:00.000Z',
+        }),
+        stderr: '',
+      });
+
+      const result = await service.getContainerStatus('abc123');
+
+      expect(result?.status).toBe('stopped');
+    });
+
+    it('should map created state to created', async () => {
+      commandRunner.exec.mockResolvedValue({
+        stdout: JSON.stringify({
+          Id: 'abc123def456789',
+          State: { Status: 'created' },
+          Config: { Image: 'test', Labels: {} },
+          Created: '2024-01-01T00:00:00.000Z',
+        }),
+        stderr: '',
+      });
+
+      const result = await service.getContainerStatus('abc123');
+
+      expect(result?.status).toBe('created');
+    });
+
+    it('should map unknown state to error', async () => {
+      commandRunner.exec.mockResolvedValue({
+        stdout: JSON.stringify({
+          Id: 'abc123def456789',
+          State: { Status: 'paused' },
+          Config: { Image: 'test', Labels: {} },
+          Created: '2024-01-01T00:00:00.000Z',
+        }),
+        stderr: '',
+      });
+
+      const result = await service.getContainerStatus('abc123');
+
+      expect(result?.status).toBe('error');
+    });
+
+    it('should return null for invalid JSON', async () => {
+      commandRunner.exec.mockResolvedValue({
+        stdout: 'not valid json at all',
+        stderr: '',
+      });
+
+      const result = await service.getContainerStatus('abc123');
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('getResourceUsage edge cases', () => {
+    it('should handle KiB memory format', async () => {
+      commandRunner.exec.mockResolvedValue({
+        stdout: '1.00%\t512KiB / 1024KiB',
+        stderr: '',
+      });
+
+      const result = await service.getResourceUsage('abc123');
+
+      expect(result?.memoryUsageMb).toBe(0.5);
+      expect(result?.memoryLimitMb).toBe(1);
+    });
+
+    it('should return null for empty output', async () => {
+      commandRunner.exec.mockResolvedValue({
+        stdout: '',
+        stderr: '',
+      });
+
+      const result = await service.getResourceUsage('abc123');
+
+      expect(result).toBeNull();
+    });
+
+    it('should return null for insufficient tab-separated parts', async () => {
+      commandRunner.exec.mockResolvedValue({
+        stdout: '15.25%',
+        stderr: '',
+      });
+
+      const result = await service.getResourceUsage('abc123');
+
+      expect(result).toBeNull();
+    });
+
+    it('should handle plain numeric memory values', async () => {
+      commandRunner.exec.mockResolvedValue({
+        stdout: '5.00%\t100 / 200',
+        stderr: '',
+      });
+
+      const result = await service.getResourceUsage('abc123');
+
+      expect(result?.memoryUsageMb).toBe(100);
+      expect(result?.memoryLimitMb).toBe(200);
+    });
+
+    it('should handle NaN memory values', async () => {
+      commandRunner.exec.mockResolvedValue({
+        stdout: '5.00%\tabc / def',
+        stderr: '',
+      });
+
+      const result = await service.getResourceUsage('abc123');
+
+      expect(result?.memoryUsageMb).toBe(0);
+      expect(result?.memoryLimitMb).toBe(0);
+    });
+  });
+
+  describe('stopContainer with non-Error', () => {
+    it('should handle non-Error thrown from exec', async () => {
+      commandRunner.exec.mockRejectedValue('string error');
+
+      await expect(service.stopContainer('abc123')).resolves.toBeUndefined();
+    });
+  });
+
+  describe('removeContainer with non-Error', () => {
+    it('should handle non-Error thrown from exec', async () => {
+      commandRunner.exec.mockRejectedValue('string error');
+
+      await expect(service.removeContainer('abc123')).resolves.toBeUndefined();
+    });
+  });
+
+  describe('listContainers edge cases', () => {
+    it('should parse Created status', async () => {
+      commandRunner.exec.mockResolvedValue({
+        stdout: 'abc123\tclaudito-1234\tCreated\tclaudito-agent:latest\t2024-01-01 00:00:00',
+        stderr: '',
+      });
+
+      const result = await service.listContainers();
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.status).toBe('created');
+    });
+
+    it('should skip lines with fewer than 5 tab-separated parts', async () => {
+      commandRunner.exec.mockResolvedValue({
+        stdout: 'abc123\tclaudito-1234\tUp\n' +
+                'def456\tclaudito-5678\tUp 5 min\timage\t2024-01-01',
+        stderr: '',
+      });
+
+      const result = await service.listContainers();
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.containerId).toBe('def456');
+    });
+  });
+
+  describe('buildImage with default context', () => {
+    it('should use current directory when no context provided', async () => {
+      commandRunner.exec.mockResolvedValue({ stdout: '', stderr: '' });
+
+      await service.buildImage({
+        dockerfilePath: '/path/to/Dockerfile',
+        imageName: 'test:latest',
+      });
+
+      expect(commandRunner.exec).toHaveBeenCalledWith('docker', [
+        'build', '-t', 'test:latest', '-f', '/path/to/Dockerfile', '.',
+      ]);
+    });
+  });
+
+  describe('checkAvailability with non-Error', () => {
+    it('should handle non-Error thrown value', async () => {
+      commandRunner.exec.mockRejectedValue('some string error');
+
+      const result = await service.checkAvailability();
+
+      expect(result.installed).toBe(true);
+      expect(result.running).toBe(false);
+      expect(result.error).toBe('some string error');
+    });
+  });
 });
 
 describe('generateContainerName', () => {

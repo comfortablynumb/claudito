@@ -856,6 +856,50 @@ describe('DefaultGitHubCLIService', () => {
     });
   });
 
+  describe('createPR (additional branches)', () => {
+    it('should pass --draft when draft is true', async () => {
+      const { service, runner } = createService();
+      const prData = {
+        number: 7, title: 'draft pr', body: '', state: 'OPEN', isDraft: true,
+        url: 'https://github.com/owner/repo/pull/7',
+        author: { login: 'user' }, headRefName: 'draft-branch', baseRefName: 'main',
+        labels: [], reviewDecision: null,
+        createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z',
+      };
+      runner.exec
+        .mockResolvedValueOnce({ stdout: 'https://github.com/owner/repo/pull/7\n', stderr: '' })
+        .mockResolvedValueOnce({ stdout: JSON.stringify(prData), stderr: '' });
+
+      await service.createPR({
+        repo: 'owner/repo', title: 'draft pr', body: '', draft: true,
+      });
+
+      const createArgs = runner.exec.mock.calls[0]![1] as string[];
+      expect(createArgs).toContain('--draft');
+    });
+
+    it('should pass cwd option when provided', async () => {
+      const { service, runner } = createService();
+      const prData = {
+        number: 8, title: 'cwd pr', body: '', state: 'OPEN',
+        url: 'https://github.com/owner/repo/pull/8',
+        author: { login: 'user' }, headRefName: 'feat', baseRefName: 'main',
+        labels: [], reviewDecision: null,
+        createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z',
+      };
+      runner.exec
+        .mockResolvedValueOnce({ stdout: 'https://github.com/owner/repo/pull/8\n', stderr: '' })
+        .mockResolvedValueOnce({ stdout: JSON.stringify(prData), stderr: '' });
+
+      await service.createPR({
+        repo: 'owner/repo', title: 'cwd pr', body: '', cwd: '/some/dir',
+      });
+
+      const execOpts = runner.exec.mock.calls[0]![2];
+      expect(execOpts).toEqual({ cwd: '/some/dir' });
+    });
+  });
+
   describe('viewPR', () => {
     it('should return PR detail with reviews and comments', async () => {
       const { service, runner } = createService();
@@ -888,6 +932,339 @@ describe('DefaultGitHubCLIService', () => {
 
       await expect(service.viewPR({ repo: 'owner/repo', prNumber: 999 }))
         .rejects.toThrow('Failed to view PR');
+    });
+
+    it('should return empty reviews when reviews API fails', async () => {
+      const { service, runner } = createService();
+      const prData = {
+        number: 3, title: 'PR 3', body: '', state: 'OPEN',
+        url: 'https://github.com/owner/repo/pull/3',
+        author: { login: 'user' }, headRefName: 'feat', baseRefName: 'main',
+        labels: [], reviewDecision: null,
+        createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z',
+      };
+      runner.exec
+        .mockResolvedValueOnce({ stdout: JSON.stringify(prData), stderr: '' })
+        .mockRejectedValueOnce(new Error('reviews API error'))
+        .mockResolvedValueOnce({ stdout: '[]', stderr: '' });
+
+      const result = await service.viewPR({ repo: 'owner/repo', prNumber: 3 });
+
+      expect(result.reviews).toEqual([]);
+      expect(result.comments).toEqual([]);
+    });
+
+    it('should return empty comments when comments API fails', async () => {
+      const { service, runner } = createService();
+      const prData = {
+        number: 3, title: 'PR 3', body: '', state: 'OPEN',
+        url: 'https://github.com/owner/repo/pull/3',
+        author: { login: 'user' }, headRefName: 'feat', baseRefName: 'main',
+        labels: [], reviewDecision: null,
+        createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z',
+      };
+      runner.exec
+        .mockResolvedValueOnce({ stdout: JSON.stringify(prData), stderr: '' })
+        .mockResolvedValueOnce({ stdout: '[]', stderr: '' })
+        .mockRejectedValueOnce(new Error('comments API error'));
+
+      const result = await service.viewPR({ repo: 'owner/repo', prNumber: 3 });
+
+      expect(result.reviews).toEqual([]);
+      expect(result.comments).toEqual([]);
+    });
+  });
+
+  describe('viewIssue (comment fetch failure)', () => {
+    it('should return empty comments when comments API fails', async () => {
+      const { service, runner } = createService();
+      runner.exec.mockImplementation((_cmd, args) => {
+        if (args[0] === 'issue' && args[1] === 'view') {
+          return Promise.resolve({
+            stdout: JSON.stringify({
+              number: 1, title: 'Issue', body: '', state: 'OPEN',
+              url: 'https://github.com/user/repo/issues/1',
+              author: { login: 'user' }, labels: [], assignees: [],
+              milestone: null,
+              createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z',
+              comments: [],
+            }),
+            stderr: '',
+          });
+        }
+
+        return Promise.reject(new Error('API rate limited'));
+      });
+
+      const detail = await service.viewIssue({ repo: 'user/repo', issueNumber: 1 });
+
+      expect(detail.issue.number).toBe(1);
+      expect(detail.comments).toEqual([]);
+    });
+  });
+
+  describe('searchRepos (fallback fields)', () => {
+    it('should use fullName and htmlUrl and visibility fallbacks', async () => {
+      const { service, runner } = createService();
+      runner.exec.mockResolvedValue({
+        stdout: JSON.stringify([{
+          name: 'fallback-repo',
+          fullName: 'org/fallback-repo',
+          description: null,
+          htmlUrl: 'https://github.com/org/fallback-repo',
+          visibility: 'private',
+          primaryLanguage: null,
+          updatedAt: '2024-01-01T00:00:00Z',
+          stargazerCount: 0,
+        }]),
+        stderr: '',
+      });
+
+      const repos = await service.searchRepos({ query: 'fallback' });
+
+      expect(repos[0]!.fullName).toBe('org/fallback-repo');
+      expect(repos[0]!.url).toBe('https://github.com/org/fallback-repo');
+      expect(repos[0]!.isPrivate).toBe(true);
+    });
+
+    it('should fallback to name when no nameWithOwner or fullName', async () => {
+      const { service, runner } = createService();
+      runner.exec.mockResolvedValue({
+        stdout: JSON.stringify([{
+          name: 'only-name',
+          description: null,
+          primaryLanguage: null,
+          updatedAt: '2024-01-01T00:00:00Z',
+          stargazerCount: 0,
+        }]),
+        stderr: '',
+      });
+
+      const repos = await service.searchRepos({ query: 'only' });
+
+      expect(repos[0]!.fullName).toBe('only-name');
+      expect(repos[0]!.url).toBe('');
+      expect(repos[0]!.isPrivate).toBe(false);
+    });
+  });
+
+  describe('issue and PR parsers (edge cases)', () => {
+    it('should handle missing author in issue data', async () => {
+      const { service, runner } = createService();
+      runner.exec.mockResolvedValue({
+        stdout: JSON.stringify([{
+          number: 1, title: 'No author', body: null,
+          state: 'OPEN', url: 'https://github.com/u/r/issues/1',
+          author: null, labels: null, assignees: null,
+          milestone: null, createdAt: '2024-01-01T00:00:00Z',
+          updatedAt: '2024-01-01T00:00:00Z', comments: null,
+        }]),
+        stderr: '',
+      });
+
+      const issues = await service.listIssues({ repo: 'u/r' });
+
+      expect(issues[0]!.author).toBe('unknown');
+      expect(issues[0]!.body).toBe('');
+      expect(issues[0]!.labels).toEqual([]);
+      expect(issues[0]!.assignees).toEqual([]);
+      expect(issues[0]!.commentsCount).toBe(0);
+    });
+
+    it('should handle missing author and isDraft in PR data', async () => {
+      const { service, runner } = createService();
+      runner.exec.mockResolvedValue({
+        stdout: JSON.stringify([{
+          number: 1, title: 'Minimal PR', body: null,
+          state: 'OPEN', url: 'https://github.com/u/r/pull/1',
+          author: null, headRefName: 'feat', baseRefName: 'main',
+          labels: null, reviewDecision: null,
+          createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z',
+        }]),
+        stderr: '',
+      });
+
+      const prs = await service.listPRs({ repo: 'u/r' });
+
+      expect(prs[0]!.author).toBe('unknown');
+      expect(prs[0]!.body).toBe('');
+      expect(prs[0]!.isDraft).toBe(false);
+      expect(prs[0]!.labels).toEqual([]);
+    });
+  });
+
+  describe('auth error edge cases', () => {
+    it('should handle non-Error rejection in detectAuth', async () => {
+      const { service, runner } = createService();
+      runner.exec.mockImplementation((_cmd, args) => {
+        if (args[0] === '--version') {
+          return Promise.resolve({ stdout: 'gh version 2.45.0\n', stderr: '' });
+        }
+
+        return Promise.reject('string error');
+      });
+
+      const status = await service.getStatus();
+
+      expect(status.installed).toBe(true);
+      expect(status.authenticated).toBe(false);
+      expect(status.error).toContain('Auth check failed');
+    });
+
+    it('should handle error with stderr containing "not logged"', async () => {
+      const { service, runner } = createService();
+      runner.exec.mockImplementation((_cmd, args) => {
+        if (args[0] === '--version') {
+          return Promise.resolve({ stdout: 'gh version 2.45.0\n', stderr: '' });
+        }
+
+        const error = new Error('auth failed') as Error & { stderr: string };
+        error.stderr = 'You are not logged into any GitHub hosts';
+        return Promise.reject(error);
+      });
+
+      const status = await service.getStatus();
+
+      expect(status.authenticated).toBe(false);
+      expect(status.error).toBeNull();
+    });
+  });
+
+  describe('empty output handling', () => {
+    it('should return empty array for empty stdout in listLabels', async () => {
+      const { service, runner } = createService();
+      runner.exec.mockResolvedValue({ stdout: '', stderr: '' });
+
+      const result = await service.listLabels('u/r');
+
+      expect(result).toEqual([]);
+    });
+
+    it('should return empty array for empty stdout in listMilestones', async () => {
+      const { service, runner } = createService();
+      runner.exec.mockResolvedValue({ stdout: '', stderr: '' });
+
+      const result = await service.listMilestones('u/r');
+
+      expect(result).toEqual([]);
+    });
+
+    it('should return empty array for empty stdout in listCollaborators', async () => {
+      const { service, runner } = createService();
+      runner.exec.mockResolvedValue({ stdout: '', stderr: '' });
+
+      const result = await service.listCollaborators('u/r');
+
+      expect(result).toEqual([]);
+    });
+
+    it('should return empty array for empty stdout in listRepos', async () => {
+      const { service, runner } = createService();
+      runner.exec.mockResolvedValue({ stdout: '', stderr: '' });
+
+      const result = await service.listRepos();
+
+      expect(result).toEqual([]);
+    });
+
+    it('should return empty array for empty stdout in listIssues', async () => {
+      const { service, runner } = createService();
+      runner.exec.mockResolvedValue({ stdout: '', stderr: '' });
+
+      const result = await service.listIssues({ repo: 'u/r' });
+
+      expect(result).toEqual([]);
+    });
+
+    it('should return empty array for empty stdout in listPRs', async () => {
+      const { service, runner } = createService();
+      runner.exec.mockResolvedValue({ stdout: '', stderr: '' });
+
+      const result = await service.listPRs({ repo: 'u/r' });
+
+      expect(result).toEqual([]);
+    });
+  });
+
+  describe('cloneRepo (additional branches)', () => {
+    function createMockChildProcess() {
+      const child = new EventEmitter() as EventEmitter & { stderr: EventEmitter; stdout: EventEmitter };
+      child.stderr = new EventEmitter();
+      child.stdout = new EventEmitter();
+      return child;
+    }
+
+    it('should report error phase on non-zero exit with empty stderr', async () => {
+      const { service, runner } = createService();
+      const child = createMockChildProcess();
+      runner.spawn.mockReturnValue(child as any);
+
+      const progress: Array<{ phase: string; message: string }> = [];
+      const promise = service.cloneRepo(
+        { repo: 'u/r', targetDir: '/tmp/r' },
+        (p) => progress.push(p),
+      );
+
+      child.emit('close', 1);
+
+      await expect(promise).rejects.toThrow('Clone failed');
+      expect(progress.some(p => p.phase === 'error')).toBe(true);
+    });
+
+    it('should report error phase on spawn error with progress callback', async () => {
+      const { service, runner } = createService();
+      const child = createMockChildProcess();
+      runner.spawn.mockReturnValue(child as any);
+
+      const progress: Array<{ phase: string; message: string }> = [];
+      const promise = service.cloneRepo(
+        { repo: 'u/r', targetDir: '/tmp/r' },
+        (p) => progress.push(p),
+      );
+
+      child.emit('error', new Error('ENOENT'));
+
+      await expect(promise).rejects.toThrow('Clone failed');
+      expect(progress.some(p => p.phase === 'error')).toBe(true);
+    });
+  });
+
+  describe('listPRs (args)', () => {
+    it('should pass state and limit args', async () => {
+      const { service, runner } = createService();
+      runner.exec.mockResolvedValue({ stdout: '[]', stderr: '' });
+
+      await service.listPRs({ repo: 'u/r', state: 'closed', limit: 5 });
+
+      const args = runner.exec.mock.calls[0]![1] as string[];
+      expect(args).toContain('--state');
+      expect(args).toContain('closed');
+      expect(args).toContain('5');
+    });
+  });
+
+  describe('extractErrorMessage', () => {
+    it('should extract stderr from Error objects', async () => {
+      const { service, runner } = createService();
+      const err = new Error('exec failed') as Error & { stderr: string };
+      err.stderr = 'permission denied';
+      runner.exec.mockRejectedValue(err);
+
+      await expect(service.listRepos()).rejects.toThrow('permission denied');
+    });
+
+    it('should use message when no stderr', async () => {
+      const { service, runner } = createService();
+      runner.exec.mockRejectedValue(new Error('timeout'));
+
+      await expect(service.listRepos()).rejects.toThrow('timeout');
+    });
+
+    it('should handle non-Error thrown values', async () => {
+      const { service, runner } = createService();
+      runner.exec.mockRejectedValue('string error');
+
+      await expect(service.listRepos()).rejects.toThrow('string error');
     });
   });
 });

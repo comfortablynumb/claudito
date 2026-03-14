@@ -199,6 +199,30 @@ describe('DefaultProjectService', () => {
     });
   });
 
+  describe('updateProjectPath', () => {
+    it('should delegate to repository', async () => {
+      mockProjectRepository.updateProjectPath.mockResolvedValue({
+        ...sampleProject,
+        name: 'New Name',
+        path: '/new/path',
+      });
+
+      const result = await service.updateProjectPath('123', 'New Name', '/new/path');
+
+      expect(result).toBeDefined();
+      expect(result!.name).toBe('New Name');
+      expect(mockProjectRepository.updateProjectPath).toHaveBeenCalledWith('123', 'New Name', '/new/path');
+    });
+
+    it('should return null when project not found', async () => {
+      mockProjectRepository.updateProjectPath.mockResolvedValue(null);
+
+      const result = await service.updateProjectPath('nonexistent', 'Name', '/path');
+
+      expect(result).toBeNull();
+    });
+  });
+
   describe('constructor', () => {
     it('should use provided dependencies', async () => {
       const customFs: FileSystemOperations = {

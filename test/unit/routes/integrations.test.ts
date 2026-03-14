@@ -11,15 +11,19 @@ import {
   sampleGitHubRepo,
   sampleGitHubIssue,
   sampleGitHubPR,
+  sampleProject,
+  DEFAULT_TEST_SETTINGS,
 } from '../helpers/mock-factories';
 
 describe('Integrations Router', () => {
-  function createApp() {
+  function createApp(opts?: { withProject?: boolean }) {
     const githubCLIService = createMockGitHubCLIService();
     const slackService = createMockSlackService();
     const settingsRepository = createMockSettingsRepository();
     const projectService = createMockProjectService();
-    const projectRepository = createMockProjectRepository();
+    const projectRepository = opts?.withProject
+      ? createMockProjectRepository([{ ...sampleProject }])
+      : createMockProjectRepository();
     const broadcastMessages: unknown[] = [];
     const app = express();
     app.use(express.json());
@@ -721,6 +725,209 @@ describe('Integrations Router', () => {
         .send({});
 
       expect(res.status).toBe(400);
+    });
+  });
+
+  // ==========================================================================
+  // Slack Routes
+  // ==========================================================================
+
+  describe('GET /integrations/slack/status', () => {
+    it('should return slack status', async () => {
+      const { app, slackService } = createApp();
+
+      const res = await request(app).get('/integrations/slack/status');
+
+      expect(res.status).toBe(200);
+      expect(slackService.getStatus).toHaveBeenCalledWith(null);
+    });
+
+    it('should pass bot token from settings', async () => {
+      const { app, slackService, settingsRepository } = createApp();
+      settingsRepository.get.mockResolvedValueOnce({
+        ...DEFAULT_TEST_SETTINGS,
+        slack: { botToken: 'xoxb-test', appToken: '', defaultChannelId: '', enabled: true },
+      });
+
+      const res = await request(app).get('/integrations/slack/status');
+
+      expect(res.status).toBe(200);
+      expect(slackService.getStatus).toHaveBeenCalledWith('xoxb-test');
+    });
+  });
+
+  describe('POST /integrations/slack/validate', () => {
+    it('should validate a bot token', async () => {
+      const { app, slackService } = createApp();
+
+      const res = await request(app)
+        .post('/integrations/slack/validate')
+        .send({ botToken: 'xoxb-valid' });
+
+      expect(res.status).toBe(200);
+      expect(slackService.validateBotToken).toHaveBeenCalledWith('xoxb-valid');
+    });
+
+    it('should return 400 when botToken is missing', async () => {
+      const { app } = createApp();
+
+      const res = await request(app)
+        .post('/integrations/slack/validate')
+        .send({});
+
+      expect(res.status).toBe(400);
+    });
+  });
+
+  describe('GET /integrations/slack/channels', () => {
+    it('should list channels when bot token is configured', async () => {
+      const { app, slackService, settingsRepository } = createApp();
+      settingsRepository.get.mockResolvedValueOnce({
+        ...DEFAULT_TEST_SETTINGS,
+        slack: { botToken: 'xoxb-test', appToken: '', defaultChannelId: '', enabled: true },
+      });
+      slackService.listChannels.mockResolvedValueOnce([
+        { id: 'C1', name: 'general' },
+      ] as any);
+
+      const res = await request(app).get('/integrations/slack/channels');
+
+      expect(res.status).toBe(200);
+      expect(slackService.listChannels).toHaveBeenCalledWith('xoxb-test');
+    });
+
+    it('should return 400 when no bot token configured', async () => {
+      const { app } = createApp();
+
+      const res = await request(app).get('/integrations/slack/channels');
+
+      expect(res.status).toBe(400);
+    });
+  });
+
+  describe('POST /integrations/slack/link', () => {
+    it('should link a project to a channel', async () => {
+      const { app, projectRepository } = createApp({ withProject: true });
+
+      const res = await request(app)
+        .post('/integrations/slack/link')
+        .send({ projectId: sampleProject.id, channelId: 'C123' });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ success: true, channelId: 'C123' });
+      expect(projectRepository.updateSlackLinkedChannel).toHaveBeenCalledWith(
+        sampleProject.id,
+        'C123',
+      );
+    });
+
+    it('should return 404 for unknown project', async () => {
+      const { app } = createApp();
+
+      const res = await request(app)
+        .post('/integrations/slack/link')
+        .send({ projectId: 'nonexistent', channelId: 'C123' });
+
+      expect(res.status).toBe(404);
+    });
+
+    it('should return 400 when projectId is missing', async () => {
+      const { app } = createApp();
+
+      const res = await request(app)
+        .post('/integrations/slack/link')
+        .send({ channelId: 'C123' });
+
+      expect(res.status).toBe(400);
+    });
+
+    it('should return 400 when channelId is missing', async () => {
+      const { app } = createApp();
+
+      const res = await request(app)
+        .post('/integrations/slack/link')
+        .send({ projectId: sampleProject.id });
+
+      expect(res.status).toBe(400);
+    });
+  });
+
+  describe('DELETE /integrations/slack/link/:projectId', () => {
+    it('should unlink a project from a channel', async () => {
+      const { app, projectRepository } = createApp({ withProject: true });
+
+      const res = await request(app)
+        .delete(`/integrations/slack/link/${sampleProject.id}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ success: true });
+      expect(projectRepository.updateSlackLinkedChannel).toHaveBeenCalledWith(
+        sampleProject.id,
+        null,
+      );
+    });
+
+    it('should return 404 for unknown project', async () => {
+      const { app } = createApp();
+
+      const res = await request(app)
+        .delete('/integrations/slack/link/nonexistent');
+
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe('PUT /integrations/slack/settings', () => {
+    it('should update slack settings', async () => {
+      const { app, settingsRepository } = createApp();
+
+      const res = await request(app)
+        .put('/integrations/slack/settings')
+        .send({
+          botToken: 'xoxb-new',
+          appToken: 'xapp-new',
+          defaultChannelId: 'C1',
+          enabled: true,
+        });
+
+      expect(res.status).toBe(200);
+      expect(settingsRepository.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          slack: expect.objectContaining({
+            botToken: 'xoxb-new',
+            appToken: 'xapp-new',
+            defaultChannelId: 'C1',
+            enabled: true,
+          }),
+        }),
+      );
+    });
+
+    it('should return 400 when bot token is invalid', async () => {
+      const { app, slackService } = createApp();
+      slackService.validateBotToken.mockResolvedValueOnce({
+        valid: false,
+        error: 'invalid_auth',
+        workspaceName: null,
+        botUserId: null,
+      });
+
+      const res = await request(app)
+        .put('/integrations/slack/settings')
+        .send({ botToken: 'xoxb-bad' });
+
+      expect(res.status).toBe(400);
+    });
+
+    it('should skip validation for empty bot token', async () => {
+      const { app, slackService } = createApp();
+
+      const res = await request(app)
+        .put('/integrations/slack/settings')
+        .send({ botToken: '  ', enabled: false });
+
+      expect(res.status).toBe(200);
+      expect(slackService.validateBotToken).not.toHaveBeenCalled();
     });
   });
 });

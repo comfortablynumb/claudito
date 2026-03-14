@@ -55,72 +55,81 @@ export class MessageBuilder {
     mcpConfigPath?: string;
     chromeEnabled?: boolean;
   }): string[] {
-    const args: string[] = [];
+    const args: string[] = ['--print'];
 
-    // Use --print mode for non-interactive piped I/O
-    args.push('--print');
-
-    // Add model selection
     if (options.model) {
       args.push('--model', options.model);
     }
 
-    // Always disallow AskUserQuestion — in --print mode the CLI auto-responds
-    // with is_error:true before our app can send the real answer via stdin
-    const disallowed = MessageBuilder.buildDisallowedTools(options.disallowedTools);
+    MessageBuilder.addDisallowedToolArgs(args, options.disallowedTools);
+    MessageBuilder.addPermissionArgs(args, options);
+    MessageBuilder.addSessionArgs(args, options);
+    MessageBuilder.addOutputArgs(args, options);
+
+    return args;
+  }
+
+  private static addDisallowedToolArgs(args: string[], disallowedTools?: string[]): void {
+    const disallowed = MessageBuilder.buildDisallowedTools(disallowedTools);
+
     if (disallowed.length > 0) {
       args.push('--disallowedTools', disallowed.join(' '));
     }
+  }
 
-    // Permissions
+  private static addPermissionArgs(args: string[], options: {
+    skipPermissions?: boolean;
+    permissionMode?: string;
+    allowedTools?: string[];
+    appendSystemPrompt?: string;
+    agentTurns?: number;
+  }): void {
     if (options.skipPermissions) {
       args.push('--dangerously-skip-permissions');
-    } else {
-      if (options.permissionMode) {
-        args.push('--permission-mode', options.permissionMode);
-      }
-
-      // Allowed tools (space-separated string)
-      if (options.allowedTools && options.allowedTools.length > 0) {
-        args.push('--allowedTools', options.allowedTools.join(' '));
-      }
-
-      // Append system prompt (only when not skipping permissions)
-      if (options.appendSystemPrompt && options.appendSystemPrompt.trim().length > 0) {
-        args.push('--append-system-prompt', options.appendSystemPrompt.trim());
-      }
+      return;
     }
 
-    // Agent limits
+    if (options.permissionMode) {
+      args.push('--permission-mode', options.permissionMode);
+    }
+
+    if (options.allowedTools && options.allowedTools.length > 0) {
+      args.push('--allowedTools', options.allowedTools.join(' '));
+    }
+
+    if (options.appendSystemPrompt && options.appendSystemPrompt.trim().length > 0) {
+      args.push('--append-system-prompt', options.appendSystemPrompt.trim());
+    }
+
     if (options.agentTurns !== undefined && options.agentTurns > 0) {
       args.push('--max-turns', String(options.agentTurns));
     }
+  }
 
-    // Handle session ID: use --session-id for new sessions, --resume for existing
+  private static addSessionArgs(args: string[], options: {
+    sessionId?: string;
+    resumeSessionId?: string;
+  }): void {
     if (options.sessionId) {
       args.push('--session-id', options.sessionId);
     } else if (options.resumeSessionId) {
       args.push('--resume', options.resumeSessionId);
     }
+  }
 
-    // stream-json for both input and output (only works with --print)
+  private static addOutputArgs(args: string[], options: {
+    mcpConfigPath?: string;
+    chromeEnabled?: boolean;
+  }): void {
     args.push('--input-format', 'stream-json');
     args.push('--output-format', 'stream-json');
     args.push('--verbose');
 
-    // Add MCP config file if provided
     if (options.mcpConfigPath) {
       args.push('--mcp-config', options.mcpConfigPath);
     }
 
-    // Chrome browser usage
-    if (options.chromeEnabled) {
-      args.push('--chrome');
-    } else {
-      args.push('--no-chrome');
-    }
-
-    return args;
+    args.push(options.chromeEnabled ? '--chrome' : '--no-chrome');
   }
 
   /**

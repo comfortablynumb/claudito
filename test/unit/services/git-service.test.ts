@@ -18,6 +18,8 @@ jest.mock('simple-git', () => {
     tags: jest.fn(),
     tag: jest.fn(),
     addTag: jest.fn(),
+    getRemotes: jest.fn(),
+    getConfig: jest.fn(),
   };
   return jest.fn(() => mockGit);
 });
@@ -513,6 +515,134 @@ describe('SimpleGitService', () => {
       await expect(service.pushTag('/test/path', 'v1.0.0'))
         .rejects
         .toThrow(GitError);
+    });
+  });
+
+  describe('deleteTag', () => {
+    it('should delete a tag', async () => {
+      await service.deleteTag('/test/path', 'v1.0.0');
+
+      expect(mockGit.tag).toHaveBeenCalledWith(['-d', 'v1.0.0']);
+    });
+
+    it('should throw GitError on failure', async () => {
+      (mockGit.tag as jest.Mock).mockRejectedValue(new Error('Delete failed'));
+
+      await expect(service.deleteTag('/test/path', 'v1.0.0'))
+        .rejects
+        .toThrow(GitError);
+    });
+  });
+
+  describe('getRemoteUrl', () => {
+    it('should return fetch URL for matching remote', async () => {
+      (mockGit.getRemotes as jest.Mock).mockResolvedValue([
+        { name: 'origin', refs: { fetch: 'https://github.com/user/repo.git', push: 'https://github.com/user/repo.git' } },
+      ]);
+
+      const result = await service.getRemoteUrl('/test/path');
+
+      expect(result).toBe('https://github.com/user/repo.git');
+    });
+
+    it('should return URL for specific remote', async () => {
+      (mockGit.getRemotes as jest.Mock).mockResolvedValue([
+        { name: 'origin', refs: { fetch: 'https://origin.git' } },
+        { name: 'upstream', refs: { fetch: 'https://upstream.git' } },
+      ]);
+
+      const result = await service.getRemoteUrl('/test/path', 'upstream');
+
+      expect(result).toBe('https://upstream.git');
+    });
+
+    it('should return null when remote not found', async () => {
+      (mockGit.getRemotes as jest.Mock).mockResolvedValue([
+        { name: 'origin', refs: { fetch: 'https://origin.git' } },
+      ]);
+
+      const result = await service.getRemoteUrl('/test/path', 'upstream');
+
+      expect(result).toBeNull();
+    });
+
+    it('should return null on error', async () => {
+      (mockGit.getRemotes as jest.Mock).mockRejectedValue(new Error('No remotes'));
+
+      const result = await service.getRemoteUrl('/test/path');
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('getUserName', () => {
+    it('should return user name from git config', async () => {
+      (mockGit.getConfig as jest.Mock).mockResolvedValue({ value: 'John Doe' });
+
+      const result = await service.getUserName('/test/path');
+
+      expect(result).toBe('John Doe');
+      expect(mockGit.getConfig).toHaveBeenCalledWith('user.name');
+    });
+
+    it('should return null when no user name configured', async () => {
+      (mockGit.getConfig as jest.Mock).mockResolvedValue({ value: null });
+
+      const result = await service.getUserName('/test/path');
+
+      expect(result).toBeNull();
+    });
+
+    it('should return null on error', async () => {
+      (mockGit.getConfig as jest.Mock).mockRejectedValue(new Error('Config error'));
+
+      const result = await service.getUserName('/test/path');
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('pull with rebase', () => {
+    it('should pull with rebase flag', async () => {
+      (mockGit.raw as jest.Mock).mockResolvedValue('Rebased');
+
+      const result = await service.pull('/test/path', 'origin', 'main', true);
+
+      expect(mockGit.raw).toHaveBeenCalledWith(['pull', '--rebase', 'origin', 'main']);
+      expect(result).toBe('Rebased');
+    });
+  });
+
+  describe('mapStatusChar edge cases', () => {
+    it('should map copied status', async () => {
+      (mockGit.checkIsRepo as jest.Mock).mockResolvedValue(true);
+      (mockGit.status as jest.Mock).mockResolvedValue({
+        files: [{ path: 'copied.ts', index: 'C', working_dir: ' ' }],
+      });
+
+      const result = await service.getStatus('/test/path');
+
+      expect(result.staged[0]?.status).toBe('copied');
+    });
+
+    it('should map unknown status to modified', async () => {
+      (mockGit.checkIsRepo as jest.Mock).mockResolvedValue(true);
+      (mockGit.status as jest.Mock).mockResolvedValue({
+        files: [{ path: 'weird.ts', index: 'U', working_dir: ' ' }],
+      });
+
+      const result = await service.getStatus('/test/path');
+
+      expect(result.staged[0]?.status).toBe('modified');
+    });
+  });
+
+  describe('createGitService', () => {
+    it('should create a SimpleGitService instance', () => {
+      const { createGitService } = require('../../../src/services/git-service');
+      const svc = createGitService();
+
+      expect(svc).toBeInstanceOf(SimpleGitService);
     });
   });
 });

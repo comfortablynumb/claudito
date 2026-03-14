@@ -17,11 +17,13 @@ import {
   createMockInstructionGenerator,
   createMockRunConfigurationService,
   createMockRunConfigImportService,
+  createMockRunProcessManager,
   sampleProject,
   sampleRunConfiguration,
 } from '../../helpers/mock-factories';
 import { RunConfigurationService } from '../../../../src/services/run-config/types';
 import { RunConfigImportService } from '../../../../src/services/run-config/import-types';
+import { RunProcessManager } from '../../../../src/services/run-config/run-process-types';
 import { createErrorHandler } from '../../../../src/utils';
 
 jest.mock('../../../../src/middleware/rate-limit', () => ({
@@ -61,12 +63,14 @@ describe('Run Configs Routes', () => {
   let app: Express;
   let mockRunConfigService: jest.Mocked<RunConfigurationService>;
   let mockImportService: jest.Mocked<RunConfigImportService>;
+  let mockRunProcessManager: jest.Mocked<RunProcessManager>;
   const projectId = sampleProject.id;
   const basePath = `/api/projects/${projectId}/run-configs`;
 
   interface SetupOptions {
     runConfigService?: RunConfigurationService | null;
     importService?: RunConfigImportService | null;
+    runProcessManager?: RunProcessManager | null;
   }
 
   function setupApp(options: SetupOptions = {}): void {
@@ -87,6 +91,9 @@ describe('Run Configs Routes', () => {
       runConfigImportService: options.importService === null
         ? undefined
         : (options.importService || mockImportService),
+      runProcessManager: options.runProcessManager === null
+        ? undefined
+        : (options.runProcessManager || mockRunProcessManager),
     };
 
     app = express();
@@ -98,6 +105,7 @@ describe('Run Configs Routes', () => {
   beforeEach(() => {
     mockRunConfigService = createMockRunConfigurationService();
     mockImportService = createMockRunConfigImportService();
+    mockRunProcessManager = createMockRunProcessManager();
     setupApp();
   });
 
@@ -205,6 +213,103 @@ describe('Run Configs Routes', () => {
         .delete(`${basePath}/nonexistent`);
 
       expect(res.status).toBe(404);
+    });
+  });
+
+  describe('POST /:id/run-configs/:configId/start', () => {
+    const configPath = `${basePath}/${sampleRunConfiguration.id}/start`;
+
+    it('should start a run configuration process', async () => {
+      mockRunConfigService.getById.mockResolvedValue(sampleRunConfiguration);
+
+      const res = await request(app).post(configPath);
+
+      expect(res.status).toBe(200);
+      expect(res.body.configId).toBe(sampleRunConfiguration.id);
+      expect(res.body.state).toBe('running');
+      expect(mockRunProcessManager.start).toHaveBeenCalledWith(
+        projectId,
+        sampleProject.path,
+        sampleRunConfiguration.id,
+      );
+    });
+
+    it('should return 404 when config not found', async () => {
+      mockRunConfigService.getById.mockResolvedValue(null);
+
+      const res = await request(app).post(configPath);
+
+      expect(res.status).toBe(404);
+      expect(mockRunProcessManager.start).not.toHaveBeenCalled();
+    });
+
+    it('should return 503 when run process manager unavailable', async () => {
+      setupApp({ runProcessManager: null });
+
+      const res = await request(app).post(configPath);
+
+      expect(res.status).toBe(503);
+    });
+
+    it('should return 503 when run config service unavailable', async () => {
+      setupApp({ runConfigService: null });
+
+      const res = await request(app).post(configPath);
+
+      expect(res.status).toBe(503);
+    });
+  });
+
+  describe('POST /:id/run-configs/:configId/stop', () => {
+    const configPath = `${basePath}/${sampleRunConfiguration.id}/stop`;
+
+    it('should stop a run configuration process', async () => {
+      const res = await request(app).post(configPath);
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(mockRunProcessManager.stop).toHaveBeenCalledWith(
+        projectId,
+        sampleRunConfiguration.id,
+      );
+    });
+
+    it('should return 503 when run process manager unavailable', async () => {
+      setupApp({ runProcessManager: null });
+
+      const res = await request(app).post(configPath);
+
+      expect(res.status).toBe(503);
+    });
+  });
+
+  describe('GET /:id/run-configs/:configId/status', () => {
+    const configPath = `${basePath}/${sampleRunConfiguration.id}/status`;
+
+    it('should return status of a run configuration process', async () => {
+      const res = await request(app).get(configPath);
+
+      expect(res.status).toBe(200);
+      expect(res.body.configId).toBe(sampleRunConfiguration.id);
+      expect(mockRunProcessManager.getStatus).toHaveBeenCalledWith(
+        projectId,
+        sampleRunConfiguration.id,
+      );
+    });
+
+    it('should return stopped status when process not running', async () => {
+      const res = await request(app).get(configPath);
+
+      expect(res.status).toBe(200);
+      expect(res.body.state).toBe('stopped');
+    });
+
+    it('should return 503 when run process manager unavailable', async () => {
+      setupApp({ runProcessManager: null });
+
+      const res = await request(app).get(configPath);
+
+      expect(res.status).toBe(503);
     });
   });
 

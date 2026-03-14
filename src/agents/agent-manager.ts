@@ -25,6 +25,7 @@ import {
   ProjectRepository,
   ConversationRepository,
   SettingsRepository,
+  GlobalSettings,
   McpServerConfig,
   McpOverrides,
   ProjectStatus,
@@ -377,10 +378,7 @@ export class DefaultAgentManager implements AgentManager {
     await this.startAgentImmediately(projectId, instructions, 'autonomous');
   }
 
-  async startInteractiveAgent(projectId: string, options?: StartInteractiveAgentOptions): Promise<StartAgentResult> {
-    // Clear any pending plan so manual mode switches don't leave the plan gate active
-    this.pendingPlans.delete(projectId);
-
+  private validateAgentCanStart(projectId: string): void {
     if (this.agents.has(projectId)) {
       throw new Error('Agent is already running for this project');
     }
@@ -392,76 +390,107 @@ export class DefaultAgentManager implements AgentManager {
     if (this.agents.size >= this.maxConcurrentAgents) {
       throw new ConflictError(`Maximum concurrent agents limit (${this.maxConcurrentAgents}) reached. Stop an existing agent to start a new one.`);
     }
+  }
+
+  private resolveInitialInstructions(options?: StartInteractiveAgentOptions): string | undefined {
+    if (!options?.initialMessage) {
+      return undefined;
+    }
+
+    if (options.images && options.images.length > 0) {
+      return this.buildMultimodalContent(options.initialMessage, options.images);
+    }
+
+    return options.initialMessage;
+  }
+
+  private async resolvePermissionConfig(
+    project: ProjectStatus,
+    mcpServers: McpServerConfig[],
+    requestedMode?: 'acceptEdits' | 'plan',
+  ): Promise<PermissionConfig> {
+    const settings = await this.settingsRepository.get();
+    const projectOverrides = project.permissionOverrides ?? null;
+    const permArgs = this.permissionGenerator.generateArgs(settings.claudePermissions, projectOverrides, mcpServers);
+
+    const effectiveMode = requestedMode || permArgs.permissionMode;
+    const shouldSkip = effectiveMode !== 'plan' &&
+      (permArgs.skipPermissions || settings.claudePermissions.dangerouslySkipPermissions);
+
+    return {
+      skipPermissions: shouldSkip,
+      allowedTools: shouldSkip ? [] : permArgs.allowedTools,
+      disallowedTools: shouldSkip ? [] : permArgs.disallowedTools,
+      permissionMode: effectiveMode,
+    };
+  }
+
+  private recordSlackMessage(projectId: string, agent: Agent, options: StartInteractiveAgentOptions): void {
+    if (!options.initialMessage || !options.slackMeta) {
+      return;
+    }
+
+    const conversationId = agent.sessionId;
+    if (!conversationId) {
+      return;
+    }
+
+    const userMessage: AgentMessage = {
+      type: 'user',
+      content: options.initialMessage,
+      timestamp: new Date().toISOString(),
+      source: options.slackMeta.source,
+      slackUsername: options.slackMeta.slackUsername,
+    };
+
+    this.trackMessageSave(
+      this.conversationRepository.addMessage(projectId, conversationId, userMessage)
+    ).catch((err) => {
+      this.logger.error('Failed to save initial Slack message to conversation', {
+        projectId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+
+    this.emit('message', projectId, userMessage);
+  }
+
+  async startInteractiveAgent(projectId: string, options?: StartInteractiveAgentOptions): Promise<StartAgentResult> {
+    this.pendingPlans.delete(projectId);
+    this.validateAgentCanStart(projectId);
 
     const project = await this.projectRepository.findById(projectId);
     if (!project) {
       throw new Error(`Project not found: ${projectId}`);
     }
 
-    // Handle session management
     const sessionResult = await this.sessionManager.getOrCreateSession(
-      projectId,
-      options?.sessionId,
-      options?.isNewSession
+      projectId, options?.sessionId, options?.isNewSession
     );
 
-    // Prepare initial instructions if provided
-    let initialInstructions: string | undefined;
-    if (options?.initialMessage) {
-      if (options.images && options.images.length > 0) {
-        initialInstructions = this.buildMultimodalContent(options.initialMessage, options.images);
-      } else {
-        initialInstructions = options.initialMessage;
-      }
-    }
-
-    // Get settings
+    const initialInstructions = this.resolveInitialInstructions(options);
     const settings = await this.settingsRepository.get();
-    const projectOverrides = project.permissionOverrides ?? null;
-
-    // Get model
     const model = await this.getModelForProject(projectId);
 
-    // Get enabled MCP servers
     const globalMcpServers = settings.mcp?.enabled
       ? (settings.mcp.servers || []).filter((server) => server.enabled)
       : [];
-
-    // Apply per-project MCP overrides
     const mcpServers = this.applyMcpOverrides(globalMcpServers, project.mcpOverrides);
 
-    // Generate permission config with MCP servers
-    const permArgs = this.permissionGenerator.generateArgs(settings.claudePermissions, projectOverrides, mcpServers);
+    const permissionConfig = await this.resolvePermissionConfig(project, mcpServers, options?.permissionMode);
 
-    const effectiveMode = options?.permissionMode || permArgs.permissionMode;
-    const shouldSkip = effectiveMode !== 'plan' &&
-      (permArgs.skipPermissions || settings.claudePermissions.dangerouslySkipPermissions);
-
-    const permissionConfig: PermissionConfig = {
-      skipPermissions: shouldSkip,
-      allowedTools: shouldSkip ? [] : permArgs.allowedTools,
-      disallowedTools: shouldSkip ? [] : permArgs.disallowedTools,
-      permissionMode: effectiveMode,
-    };
-
-    // Docker sandboxed execution (pass per-project image if set)
     const dockerResult = await this.getDockerProcessSpawner(
-      projectId,
-      project.path,
-      project.dockerImage ?? undefined,
+      projectId, project.path, project.dockerImage ?? undefined,
     );
 
-    // If container was recreated and this is a resume, force new session
     let effectiveSessionResult = sessionResult;
     if (dockerResult.containerWasRecreated && !sessionResult.isNewSession) {
       this.logger.warn('Container was recreated, forcing new session', { projectId });
       effectiveSessionResult = await this.sessionManager.getOrCreateSession(projectId, undefined, true);
     }
 
-    // Resolve agent profile
     const agentProfile = await this.resolveProfileForProject(projectId);
 
-    // Create agent
     const agent = this.agentFactory.create({
       projectId,
       projectPath: project.path,
@@ -476,51 +505,17 @@ export class DefaultAgentManager implements AgentManager {
       agentProfile,
     });
 
-    // Store agent
     this.agents.set(projectId, agent);
     this.setupAgentListeners(agent);
+    this.trackAgentProcess(projectId, agent);
 
-    // Track process when it starts
-    const statusHandler = (status: AgentStatus): void => {
-      if (status === 'running' && agent.processInfo) {
-        const processInfo = agent.processInfo;
-        this.processTracker.trackProcess(projectId, processInfo.pid);
-        // Remove listener after first call
-        agent.off('status', statusHandler);
-      }
-    };
-    agent.on('status', statusHandler);
-
-    // Start agent
     agent.start(initialInstructions || '');
 
     const cliCmd = agent.lastCommand;
     if (cliCmd) this.recordCliCommand(projectId, 'Interactive', cliCmd);
 
-    // Record and broadcast the initial user message (e.g. from Slack) so it appears in the browser
-    if (options?.initialMessage && options.slackMeta) {
-      const conversationId = agent.sessionId;
-
-      if (conversationId) {
-        const userMessage: AgentMessage = {
-          type: 'user',
-          content: options.initialMessage,
-          timestamp: new Date().toISOString(),
-          source: options.slackMeta.source,
-          slackUsername: options.slackMeta.slackUsername,
-        };
-
-        this.trackMessageSave(
-          this.conversationRepository.addMessage(projectId, conversationId, userMessage)
-        ).catch((err) => {
-          this.logger.error('Failed to save initial Slack message to conversation', {
-            projectId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        });
-
-        this.emit('message', projectId, userMessage);
-      }
+    if (options) {
+      this.recordSlackMessage(projectId, agent, options);
     }
 
     return {
@@ -990,35 +985,13 @@ export class DefaultAgentManager implements AgentManager {
     }
 
     const oneOffId = `oneoff-${generateUUID()}`;
-
-    this.logger.info('Starting one-off agent', {
-      oneOffId,
-      projectId: options.projectId,
-    });
+    this.logger.info('Starting one-off agent', { oneOffId, projectId: options.projectId });
 
     const settings = await this.settingsRepository.get();
-    const projectOverrides = project.permissionOverrides ?? null;
-    const permArgs = this.permissionGenerator.generateArgs(settings.claudePermissions, projectOverrides);
-
-    const effectiveOneOffMode = options.permissionMode || permArgs.permissionMode;
-    const shouldSkipOneOff = effectiveOneOffMode !== 'plan' &&
-      (permArgs.skipPermissions || settings.claudePermissions.dangerouslySkipPermissions);
-
-    const permissionConfig: PermissionConfig = {
-      skipPermissions: shouldSkipOneOff,
-      allowedTools: shouldSkipOneOff ? [] : permArgs.allowedTools,
-      disallowedTools: shouldSkipOneOff ? [] : permArgs.disallowedTools,
-      permissionMode: effectiveOneOffMode,
-      appendSystemPrompt: options.appendSystemPrompt || settings.appendSystemPrompt,
-    };
-
+    const permissionConfig = this.resolveOneOffPermissions(settings, project, options);
     const model = await this.getModelForProject(options.projectId);
-
-    // Docker sandboxed execution
     const dockerResult = await this.getDockerProcessSpawner(
-      options.projectId,
-      project.path,
-      project.dockerImage ?? undefined,
+      options.projectId, project.path, project.dockerImage ?? undefined,
     );
 
     if (dockerResult.dockerFallback) {
@@ -1026,7 +999,6 @@ export class DefaultAgentManager implements AgentManager {
     }
 
     const agentProfile = await this.resolveProfileForProject(options.projectId);
-
     const agent = this.agentFactory.create({
       projectId: options.projectId,
       projectPath: project.path,
@@ -1038,28 +1010,56 @@ export class DefaultAgentManager implements AgentManager {
       agentProfile,
     });
 
+    this.registerOneOffAgent(oneOffId, agent, options);
+    agent.start(options.message);
+    this.recordOneOffCommand(oneOffId, agent, options);
+
+    return oneOffId;
+  }
+
+  private resolveOneOffPermissions(
+    settings: GlobalSettings,
+    project: ProjectStatus,
+    options: OneOffAgentOptions,
+  ): PermissionConfig {
+    const projectOverrides = project.permissionOverrides ?? null;
+    const permArgs = this.permissionGenerator.generateArgs(settings.claudePermissions, projectOverrides);
+    const effectiveMode = options.permissionMode || permArgs.permissionMode;
+    const shouldSkip = effectiveMode !== 'plan' &&
+      (permArgs.skipPermissions || settings.claudePermissions.dangerouslySkipPermissions);
+
+    return {
+      skipPermissions: shouldSkip,
+      allowedTools: shouldSkip ? [] : permArgs.allowedTools,
+      disallowedTools: shouldSkip ? [] : permArgs.disallowedTools,
+      permissionMode: effectiveMode,
+      appendSystemPrompt: options.appendSystemPrompt || settings.appendSystemPrompt,
+    };
+  }
+
+  private registerOneOffAgent(oneOffId: string, agent: Agent, options: OneOffAgentOptions): void {
     this.oneOffAgents.set(oneOffId, agent);
     this.oneOffMeta.set(oneOffId, {
       projectId: options.projectId,
       label: options.label || 'One-off Agent',
     });
     this.setupOneOffAgentListeners(oneOffId, agent);
-    agent.start(options.message);
+  }
 
+  private recordOneOffCommand(oneOffId: string, agent: Agent, options: OneOffAgentOptions): void {
     const cmd = agent.lastCommand;
 
-    if (cmd) {
-      const label = options.label || 'One-off Agent';
-      const entries = this.oneOffCommandHistory.get(options.projectId) ?? [];
-      entries.push({ label, command: cmd, timestamp: new Date().toISOString() });
-
-      if (entries.length > 50) entries.splice(0, entries.length - 50);
-      this.oneOffCommandHistory.set(options.projectId, entries);
-
-      this.recordCliCommand(options.projectId, label, cmd);
+    if (!cmd) {
+      return;
     }
 
-    return oneOffId;
+    const label = options.label || 'One-off Agent';
+    const entries = this.oneOffCommandHistory.get(options.projectId) ?? [];
+    entries.push({ label, command: cmd, timestamp: new Date().toISOString() });
+
+    if (entries.length > 50) entries.splice(0, entries.length - 50);
+    this.oneOffCommandHistory.set(options.projectId, entries);
+    this.recordCliCommand(options.projectId, label, cmd);
   }
 
   async stopOneOffAgent(oneOffId: string): Promise<void> {
@@ -1303,17 +1303,7 @@ export class DefaultAgentManager implements AgentManager {
 
     this.agents.set(projectId, agent);
     this.setupAgentListeners(agent);
-
-    // Track process when it starts
-    const statusHandler = (status: AgentStatus): void => {
-      if (status === 'running' && agent.processInfo) {
-        const processInfo = agent.processInfo;
-        this.processTracker.trackProcess(projectId, processInfo.pid);
-        // Remove listener after first call
-        agent.off('status', statusHandler);
-      }
-    };
-    agent.on('status', statusHandler);
+    this.trackAgentProcess(projectId, agent);
 
     agent.start(instructions);
   }
@@ -1385,6 +1375,16 @@ export class DefaultAgentManager implements AgentManager {
     }
     // Flush the conversation repository
     await this.conversationRepository.flush();
+  }
+
+  private trackAgentProcess(projectId: string, agent: Agent): void {
+    const statusHandler = (status: AgentStatus): void => {
+      if (status === 'running' && agent.processInfo) {
+        this.processTracker.trackProcess(projectId, agent.processInfo.pid);
+        agent.off('status', statusHandler);
+      }
+    };
+    agent.on('status', statusHandler);
   }
 
   private setupAgentListeners(agent: Agent): void {

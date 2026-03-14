@@ -187,6 +187,66 @@ describe('Inventify Router', () => {
     });
   });
 
+  describe('POST /cancel', () => {
+    it('should return 200 on successful cancel', async () => {
+      const mockInventifyService = createMockInventifyService();
+      mockInventifyService.cancel.mockResolvedValue(undefined);
+
+      const { app } = createTestApp({
+        inventifyService: mockInventifyService,
+      });
+
+      const res = await request(app)
+        .post('/cancel')
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+      expect(mockInventifyService.cancel).toHaveBeenCalled();
+    });
+
+    it('should return 500 if cancel throws', async () => {
+      const mockInventifyService = createMockInventifyService();
+      mockInventifyService.cancel.mockRejectedValue(
+        new Error('Cancel failed'),
+      );
+
+      const { app } = createTestApp({
+        inventifyService: mockInventifyService,
+      });
+
+      const res = await request(app)
+        .post('/cancel')
+        .expect(500);
+
+      expect(res.body.error).toBe('Cancel failed');
+    });
+
+    it('should return 500 with generic message for non-Error throws', async () => {
+      const mockInventifyService = createMockInventifyService();
+      mockInventifyService.cancel.mockRejectedValue('string error');
+
+      const { app } = createTestApp({
+        inventifyService: mockInventifyService,
+      });
+
+      const res = await request(app)
+        .post('/cancel')
+        .expect(500);
+
+      expect(res.body.error).toBe('Unknown error');
+    });
+
+    it('should return 503 if service not available', async () => {
+      const { app } = createTestApp({
+        inventifyService: undefined,
+      });
+
+      await request(app)
+        .post('/cancel')
+        .expect(503);
+    });
+  });
+
   describe('POST /suggest-names', () => {
     it('should return 201 with oneOffId', async () => {
       const { app } = createTestApp();
@@ -219,6 +279,24 @@ describe('Inventify Router', () => {
         .send({ selectedIndex: 0 })
         .expect(503);
     });
+
+    it('should return 500 if suggestNames throws', async () => {
+      const mockInventifyService = createMockInventifyService();
+      mockInventifyService.suggestNames.mockRejectedValue(
+        new Error('No pending ideas'),
+      );
+
+      const { app } = createTestApp({
+        inventifyService: mockInventifyService,
+      });
+
+      const res = await request(app)
+        .post('/suggest-names')
+        .send({ selectedIndex: 0 })
+        .expect(500);
+
+      expect(res.body.error).toBe('No pending ideas');
+    });
   });
 
   describe('GET /name-suggestions', () => {
@@ -247,6 +325,16 @@ describe('Inventify Router', () => {
       await request(app)
         .get('/name-suggestions')
         .expect(404);
+    });
+
+    it('should return 503 if service not available', async () => {
+      const { app } = createTestApp({
+        inventifyService: undefined,
+      });
+
+      await request(app)
+        .get('/name-suggestions')
+        .expect(503);
     });
   });
 

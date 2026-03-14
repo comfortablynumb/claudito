@@ -341,77 +341,77 @@ Write the ROADMAP.md file to doc/ROADMAP.md now.`;
       const parsed: unknown = JSON.parse(line);
 
       if (typeof parsed !== 'object' || parsed === null) {
-        if (line.trim()) {
-          this.emitMessage(projectId, 'stdout', line);
-        }
+        this.emitNonEmpty(projectId, 'stdout', line);
         return;
       }
 
       const event = parsed as StreamEvent;
-
-      // Handle different event types from stream-json format
-      switch (event.type) {
-        case 'assistant':
-          // Assistant message - this is the main output
-          if (event.message?.content) {
-            for (const block of event.message.content) {
-              if (block.type === 'text' && block.text) {
-                this.emitMessage(projectId, 'stdout', block.text);
-              } else if (block.type === 'tool_use' && block.name) {
-                this.emitMessage(projectId, 'system', `Using tool: ${block.name}`);
-              }
-            }
-          }
-          break;
-
-        case 'content_block_delta':
-          // Streaming text delta
-          if (event.delta?.text) {
-            this.emitMessage(projectId, 'stdout', event.delta.text);
-          }
-          break;
-
-        case 'content_block_start':
-          // New content block starting
-          if (event.content_block?.type === 'tool_use' && event.content_block.name) {
-            this.emitMessage(projectId, 'system', `Using tool: ${event.content_block.name}`);
-          }
-          break;
-
-        case 'result':
-          // Final result
-          logger.info('Received result event', { result: event.subtype });
-          break;
-
-        case 'system':
-          // System init - session ID captured internally
-          break;
-
-        case 'user':
-          // User input confirmation (question response)
-          break;
-
-        default:
-          // Log unknown event types for debugging
-          logger.debug('Unknown event type', { type: event.type, event });
-      }
-
-      // Check for questions in the content
-      if (event.type === 'assistant' && event.message?.content) {
-        const textContent = event.message.content
-          .filter((b) => b.type === 'text')
-          .map((b) => b.text ?? '')
-          .join('');
-
-        if (this.looksLikeQuestion(textContent)) {
-          this.emitMessage(projectId, 'question', textContent);
-        }
-      }
+      this.handleStreamEvent(projectId, event, logger);
+      this.checkForQuestions(projectId, event);
     } catch {
-      // Not JSON or parse error - emit as plain text
-      if (line.trim()) {
-        this.emitMessage(projectId, 'stdout', line);
+      this.emitNonEmpty(projectId, 'stdout', line);
+    }
+  }
+
+  private emitNonEmpty(projectId: string, type: 'stdout' | 'stderr' | 'system' | 'question', line: string): void {
+    if (line.trim()) {
+      this.emitMessage(projectId, type, line);
+    }
+  }
+
+  private handleStreamEvent(projectId: string, event: StreamEvent, logger: Logger): void {
+    switch (event.type) {
+      case 'assistant':
+        this.handleAssistantEvent(projectId, event);
+        break;
+
+      case 'content_block_delta':
+        if (event.delta?.text) {
+          this.emitMessage(projectId, 'stdout', event.delta.text);
+        }
+        break;
+
+      case 'content_block_start':
+        if (event.content_block?.type === 'tool_use' && event.content_block.name) {
+          this.emitMessage(projectId, 'system', `Using tool: ${event.content_block.name}`);
+        }
+        break;
+
+      case 'result':
+        logger.info('Received result event', { result: event.subtype });
+        break;
+
+      case 'system':
+      case 'user':
+        break;
+
+      default:
+        logger.debug('Unknown event type', { type: event.type, event });
+    }
+  }
+
+  private handleAssistantEvent(projectId: string, event: StreamEvent): void {
+    if (!event.message?.content) return;
+
+    for (const block of event.message.content) {
+      if (block.type === 'text' && block.text) {
+        this.emitMessage(projectId, 'stdout', block.text);
+      } else if (block.type === 'tool_use' && block.name) {
+        this.emitMessage(projectId, 'system', `Using tool: ${block.name}`);
       }
+    }
+  }
+
+  private checkForQuestions(projectId: string, event: StreamEvent): void {
+    if (event.type !== 'assistant' || !event.message?.content) return;
+
+    const textContent = event.message.content
+      .filter((b) => b.type === 'text')
+      .map((b) => b.text ?? '')
+      .join('');
+
+    if (this.looksLikeQuestion(textContent)) {
+      this.emitMessage(projectId, 'question', textContent);
     }
   }
 

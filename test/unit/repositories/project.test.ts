@@ -656,6 +656,344 @@ describe('FileProjectRepository', () => {
     });
   });
 
+  describe('updateMcpOverrides', () => {
+    const testOverrides: import('../../../src/repositories/project').McpOverrides = {
+      enabled: true,
+      serverOverrides: {
+        'mcp-server-1': { enabled: true },
+        'mcp-server-2': { enabled: false },
+      },
+    };
+
+    it('should return null for non-existent project', async () => {
+      const result = await repository.updateMcpOverrides('non-existent', testOverrides);
+      expect(result).toBeNull();
+    });
+
+    it('should update MCP overrides', async () => {
+      const created = await repository.create({ name: 'Test', path: '/test' });
+
+      const updated = await repository.updateMcpOverrides(created.id, testOverrides);
+
+      expect(updated).toBeDefined();
+      expect(updated!.mcpOverrides).toEqual(testOverrides);
+    });
+
+    it('should allow setting MCP overrides to null', async () => {
+      const created = await repository.create({ name: 'Test', path: '/test' });
+      await repository.updateMcpOverrides(created.id, testOverrides);
+
+      const updated = await repository.updateMcpOverrides(created.id, null);
+
+      expect(updated!.mcpOverrides).toBeNull();
+    });
+
+    it('should persist MCP overrides change', async () => {
+      const created = await repository.create({ name: 'Test', path: '/test' });
+      await repository.updateMcpOverrides(created.id, testOverrides);
+
+      const found = await repository.findById(created.id);
+
+      expect(found!.mcpOverrides).toEqual(testOverrides);
+    });
+  });
+
+  describe('updateRunConfigurations', () => {
+    const testConfigs: import('../../../src/repositories/project').RunConfiguration[] = [
+      {
+        id: 'config-1',
+        name: 'Dev Server',
+        command: 'npm',
+        args: ['run', 'dev'],
+        cwd: '/project',
+        env: { NODE_ENV: 'development' },
+        shell: null,
+        autoRestart: true,
+        autoRestartDelay: 1000,
+        autoRestartMaxRetries: 3,
+        preLaunchConfigId: null,
+        createdAt: '2024-01-01T00:00:00Z',
+        updatedAt: '2024-01-01T00:00:00Z',
+      },
+    ];
+
+    it('should return null for non-existent project', async () => {
+      const result = await repository.updateRunConfigurations('non-existent', testConfigs);
+      expect(result).toBeNull();
+    });
+
+    it('should update run configurations', async () => {
+      const created = await repository.create({ name: 'Test', path: '/test' });
+
+      const updated = await repository.updateRunConfigurations(created.id, testConfigs);
+
+      expect(updated).toBeDefined();
+      expect(updated!.runConfigurations).toEqual(testConfigs);
+    });
+
+    it('should allow setting empty run configurations', async () => {
+      const created = await repository.create({ name: 'Test', path: '/test' });
+      await repository.updateRunConfigurations(created.id, testConfigs);
+
+      const updated = await repository.updateRunConfigurations(created.id, []);
+
+      expect(updated!.runConfigurations).toEqual([]);
+    });
+
+    it('should persist run configurations change', async () => {
+      const created = await repository.create({ name: 'Test', path: '/test' });
+      await repository.updateRunConfigurations(created.id, testConfigs);
+
+      const found = await repository.findById(created.id);
+
+      expect(found!.runConfigurations).toEqual(testConfigs);
+    });
+  });
+
+  describe('updateDockerOverride', () => {
+    it('should return null for non-existent project', async () => {
+      const result = await repository.updateDockerOverride('non-existent', true);
+      expect(result).toBeNull();
+    });
+
+    it('should set docker override to true', async () => {
+      const created = await repository.create({ name: 'Test', path: '/test' });
+
+      const updated = await repository.updateDockerOverride(created.id, true);
+
+      expect(updated).toBeDefined();
+      expect(updated!.dockerOverride).toBe(true);
+    });
+
+    it('should set docker override to false', async () => {
+      const created = await repository.create({ name: 'Test', path: '/test' });
+
+      const updated = await repository.updateDockerOverride(created.id, false);
+
+      expect(updated!.dockerOverride).toBe(false);
+    });
+
+    it('should allow setting docker override to undefined', async () => {
+      const created = await repository.create({ name: 'Test', path: '/test' });
+      await repository.updateDockerOverride(created.id, true);
+
+      const updated = await repository.updateDockerOverride(created.id, undefined);
+
+      expect(updated!.dockerOverride).toBeUndefined();
+    });
+
+    it('should persist docker override change', async () => {
+      const created = await repository.create({ name: 'Test', path: '/test' });
+      await repository.updateDockerOverride(created.id, true);
+
+      const found = await repository.findById(created.id);
+
+      expect(found!.dockerOverride).toBe(true);
+    });
+  });
+
+  describe('updateDockerImage', () => {
+    it('should return null for non-existent project', async () => {
+      const result = await repository.updateDockerImage('non-existent', 'my-image:latest');
+      expect(result).toBeNull();
+    });
+
+    it('should update docker image', async () => {
+      const created = await repository.create({ name: 'Test', path: '/test' });
+
+      const updated = await repository.updateDockerImage(created.id, 'my-image:latest');
+
+      expect(updated).toBeDefined();
+      expect(updated!.dockerImage).toBe('my-image:latest');
+    });
+
+    it('should allow setting docker image to null', async () => {
+      const created = await repository.create({ name: 'Test', path: '/test' });
+      await repository.updateDockerImage(created.id, 'my-image:latest');
+
+      const updated = await repository.updateDockerImage(created.id, null);
+
+      expect(updated!.dockerImage).toBeNull();
+    });
+
+    it('should persist docker image change', async () => {
+      const created = await repository.create({ name: 'Test', path: '/test' });
+      await repository.updateDockerImage(created.id, 'custom-image:v2');
+
+      const found = await repository.findById(created.id);
+
+      expect(found!.dockerImage).toBe('custom-image:v2');
+    });
+  });
+
+  describe('updateSlackNotification', () => {
+    const testConfig: import('../../../src/repositories/project').SlackNotificationConfig = {
+      channelId: 'C12345',
+      events: ['agent_completed', 'agent_failed'],
+      mentionUsers: ['U001', 'U002'],
+      threadReplies: true,
+    };
+
+    it('should return null for non-existent project', async () => {
+      const result = await repository.updateSlackNotification('non-existent', testConfig);
+      expect(result).toBeNull();
+    });
+
+    it('should update slack notification config', async () => {
+      const created = await repository.create({ name: 'Test', path: '/test' });
+
+      const updated = await repository.updateSlackNotification(created.id, testConfig);
+
+      expect(updated).toBeDefined();
+      expect(updated!.slackNotification).toEqual(testConfig);
+    });
+
+    it('should allow setting slack notification to null', async () => {
+      const created = await repository.create({ name: 'Test', path: '/test' });
+      await repository.updateSlackNotification(created.id, testConfig);
+
+      const updated = await repository.updateSlackNotification(created.id, null);
+
+      expect(updated!.slackNotification).toBeNull();
+    });
+
+    it('should persist slack notification change', async () => {
+      const created = await repository.create({ name: 'Test', path: '/test' });
+      await repository.updateSlackNotification(created.id, testConfig);
+
+      const found = await repository.findById(created.id);
+
+      expect(found!.slackNotification).toEqual(testConfig);
+    });
+  });
+
+  describe('updateSlackLinkedChannel', () => {
+    it('should return null for non-existent project', async () => {
+      const result = await repository.updateSlackLinkedChannel('non-existent', 'C12345');
+      expect(result).toBeNull();
+    });
+
+    it('should update slack linked channel', async () => {
+      const created = await repository.create({ name: 'Test', path: '/test' });
+
+      const updated = await repository.updateSlackLinkedChannel(created.id, 'C12345');
+
+      expect(updated).toBeDefined();
+      expect(updated!.slackLinkedChannelId).toBe('C12345');
+    });
+
+    it('should allow setting slack linked channel to null', async () => {
+      const created = await repository.create({ name: 'Test', path: '/test' });
+      await repository.updateSlackLinkedChannel(created.id, 'C12345');
+
+      const updated = await repository.updateSlackLinkedChannel(created.id, null);
+
+      expect(updated!.slackLinkedChannelId).toBeNull();
+    });
+
+    it('should persist slack linked channel change', async () => {
+      const created = await repository.create({ name: 'Test', path: '/test' });
+      await repository.updateSlackLinkedChannel(created.id, 'C99999');
+
+      const found = await repository.findById(created.id);
+
+      expect(found!.slackLinkedChannelId).toBe('C99999');
+    });
+  });
+
+  describe('updateAgentProfileId', () => {
+    it('should return null for non-existent project', async () => {
+      const result = await repository.updateAgentProfileId('non-existent', 'profile-1');
+      expect(result).toBeNull();
+    });
+
+    it('should update agent profile id', async () => {
+      const created = await repository.create({ name: 'Test', path: '/test' });
+
+      const updated = await repository.updateAgentProfileId(created.id, 'profile-1');
+
+      expect(updated).toBeDefined();
+      expect(updated!.agentProfileId).toBe('profile-1');
+    });
+
+    it('should allow setting agent profile id to null', async () => {
+      const created = await repository.create({ name: 'Test', path: '/test' });
+      await repository.updateAgentProfileId(created.id, 'profile-1');
+
+      const updated = await repository.updateAgentProfileId(created.id, null);
+
+      expect(updated!.agentProfileId).toBeNull();
+    });
+
+    it('should persist agent profile id change', async () => {
+      const created = await repository.create({ name: 'Test', path: '/test' });
+      await repository.updateAgentProfileId(created.id, 'custom-profile');
+
+      const found = await repository.findById(created.id);
+
+      expect(found!.agentProfileId).toBe('custom-profile');
+    });
+  });
+
+  describe('updateProjectPath', () => {
+    it('should return null for non-existent project', async () => {
+      const result = await repository.updateProjectPath('non-existent', 'New Name', '/new/path');
+      expect(result).toBeNull();
+    });
+
+    it('should update project name and path', async () => {
+      const created = await repository.create({ name: 'Old Name', path: '/old/path' });
+
+      const updated = await repository.updateProjectPath(created.id, 'New Name', '/new/path');
+
+      expect(updated).toBeDefined();
+      expect(updated!.name).toBe('New Name');
+      expect(updated!.path).toBe('/new/path');
+    });
+
+    it('should generate new id from new path', async () => {
+      const created = await repository.create({ name: 'Test', path: '/test/project' });
+
+      const updated = await repository.updateProjectPath(created.id, 'Renamed', '/renamed/project');
+
+      expect(updated!.id).toBe(generateIdFromPath('/renamed/project'));
+    });
+
+    it('should remove old id from index', async () => {
+      const created = await repository.create({ name: 'Test', path: '/test/project' });
+      const oldId = created.id;
+
+      await repository.updateProjectPath(oldId, 'Renamed', '/renamed/project');
+
+      const oldProject = await repository.findById(oldId);
+      expect(oldProject).toBeNull();
+    });
+
+    it('should be findable by new id', async () => {
+      const created = await repository.create({ name: 'Test', path: '/test/project' });
+
+      const updated = await repository.updateProjectPath(created.id, 'Renamed', '/renamed/project');
+      const newId = updated!.id;
+
+      const found = await repository.findById(newId);
+      expect(found).toBeDefined();
+      expect(found!.name).toBe('Renamed');
+      expect(found!.path).toBe('/renamed/project');
+    });
+
+    it('should persist updated index to file', async () => {
+      const created = await repository.create({ name: 'Test', path: '/test/project' });
+
+      await repository.updateProjectPath(created.id, 'Renamed', '/renamed/project');
+
+      const indexContent = mockFs.files.get(indexPath);
+      const index = JSON.parse(indexContent!) as ProjectIndexEntryWithPath[];
+      expect(index).toHaveLength(1);
+      expect(index[0]?.name).toBe('Renamed');
+      expect(index[0]?.path).toBe('/renamed/project');
+    });
+  });
+
   describe('loadStatus edge cases', () => {
     it('should return null when status file is corrupted', async () => {
       const created = await repository.create({ name: 'Test', path: '/test' });

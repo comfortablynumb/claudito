@@ -465,56 +465,57 @@ export class ReviewerAgent {
 
   private handleStreamEvent(event: StreamEvent): void {
     switch (event.type) {
-      case 'assistant': {
-        const content = event.message?.content || [];
-
-        for (const block of content) {
-          if (block.type === 'text' && block.text) {
-            this.collectedOutput += block.text;
-            this.emitter.emit('output', block.text);
-          } else if (block.type === 'tool_use' && block.name) {
-            // Emit tool use event
-            const toolInfo = {
-              tool_name: block.name,
-              tool_id: block.id || '',
-              parameters: block.input || {},
-              timestamp: new Date().toISOString(),
-            };
-            this.emitter.emit('tool_use', toolInfo);
-          }
-        }
+      case 'assistant':
+        this.handleAssistantEvent(event);
         break;
-      }
 
-      case 'content_block_delta': {
-        if (event.delta?.text) {
-          this.collectedOutput += event.delta.text;
-          this.emitter.emit('output', event.delta.text);
-        }
+      case 'content_block_delta':
+        this.handleDeltaEvent(event);
         break;
-      }
 
-      case 'result': {
-        this.logger.debug('Reviewer received result event', {
-          subtype: event.subtype,
-        });
+      case 'result':
+        this.logger.debug('Reviewer received result event', { subtype: event.subtype });
         break;
-      }
 
-      case 'content_block_start': {
-        if (event.content_block?.type === 'tool_use' && event.content_block.name) {
-          // Emit tool use event
-          const toolInfo = {
-            tool_name: event.content_block.name,
-            tool_id: event.content_block.id || '',
-            parameters: event.content_block.input || {},
-            timestamp: new Date().toISOString(),
-          };
-          this.emitter.emit('tool_use', toolInfo);
-        }
+      case 'content_block_start':
+        this.handleContentBlockStart(event);
         break;
+    }
+  }
+
+  private handleAssistantEvent(event: StreamEvent): void {
+    const content = event.message?.content || [];
+
+    for (const block of content) {
+      if (block.type === 'text' && block.text) {
+        this.collectedOutput += block.text;
+        this.emitter.emit('output', block.text);
+      } else if (block.type === 'tool_use' && block.name) {
+        this.emitToolUse(block.name, block.id, block.input);
       }
     }
+  }
+
+  private handleDeltaEvent(event: StreamEvent): void {
+    if (event.delta?.text) {
+      this.collectedOutput += event.delta.text;
+      this.emitter.emit('output', event.delta.text);
+    }
+  }
+
+  private handleContentBlockStart(event: StreamEvent): void {
+    if (event.content_block?.type === 'tool_use' && event.content_block.name) {
+      this.emitToolUse(event.content_block.name, event.content_block.id, event.content_block.input);
+    }
+  }
+
+  private emitToolUse(name: string, id?: string, input?: Record<string, unknown>): void {
+    this.emitter.emit('tool_use', {
+      tool_name: name,
+      tool_id: id || '',
+      parameters: input || {},
+      timestamp: new Date().toISOString(),
+    });
   }
 
   /**

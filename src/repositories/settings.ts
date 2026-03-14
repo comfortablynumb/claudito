@@ -557,69 +557,85 @@ export class FileSettingsRepository implements SettingsRepository {
     return existingProfiles;
   }
 
-  private mergeWithDefaults(parsed: Partial<GlobalSettings>): GlobalSettings {
-    const parsedPerms = parsed.claudePermissions;
-    const parsedLimits = parsed.agentLimits;
-    const parsedStreaming = parsed.agentStreaming;
-    const parsedRalphLoop = parsed.ralphLoop;
-    const parsedMcp = parsed.mcp;
-    const parsedSlack = parsed.slack;
-    const parsedDocker = parsed.docker;
+  private mergePermissions(parsed?: Partial<ClaudePermissions>): ClaudePermissions {
+    return {
+      dangerouslySkipPermissions: parsed?.dangerouslySkipPermissions ?? DEFAULT_SETTINGS.claudePermissions.dangerouslySkipPermissions,
+      allowedTools: parsed?.allowedTools ?? DEFAULT_SETTINGS.claudePermissions.allowedTools,
+      allowRules: parsed?.allowRules ?? DEFAULT_SETTINGS.claudePermissions.allowRules,
+      askRules: parsed?.askRules ?? DEFAULT_SETTINGS.claudePermissions.askRules,
+      denyRules: parsed?.denyRules ?? DEFAULT_SETTINGS.claudePermissions.denyRules,
+      defaultMode: parsed?.defaultMode ?? DEFAULT_SETTINGS.claudePermissions.defaultMode,
+    };
+  }
 
+  private mergeRalphLoopSettings(parsed?: Partial<RalphLoopSettings>): RalphLoopSettings {
+    return {
+      defaultMaxTurns: parsed?.defaultMaxTurns ?? DEFAULT_SETTINGS.ralphLoop.defaultMaxTurns,
+      defaultWorkerModel: this.migrateOldModelId(parsed?.defaultWorkerModel) ?? DEFAULT_SETTINGS.ralphLoop.defaultWorkerModel,
+      defaultReviewerModel: this.migrateOldModelId(parsed?.defaultReviewerModel) ?? DEFAULT_SETTINGS.ralphLoop.defaultReviewerModel,
+      defaultWorkerSystemPrompt: parsed?.defaultWorkerSystemPrompt ?? DEFAULT_SETTINGS.ralphLoop.defaultWorkerSystemPrompt,
+      defaultReviewerSystemPrompt: parsed?.defaultReviewerSystemPrompt ?? DEFAULT_SETTINGS.ralphLoop.defaultReviewerSystemPrompt,
+      historyLimit: parsed?.historyLimit ?? DEFAULT_SETTINGS.ralphLoop.historyLimit,
+    };
+  }
+
+  private mergeDockerSettings(parsed?: Partial<DockerSettings>): DockerSettings {
+    return {
+      enabled: parsed?.enabled ?? DEFAULT_SETTINGS.docker.enabled,
+      baseImage: parsed?.baseImage ?? DEFAULT_SETTINGS.docker.baseImage,
+      resourceLimits: {
+        cpus: parsed?.resourceLimits?.cpus ?? DEFAULT_SETTINGS.docker.resourceLimits.cpus,
+        memoryMb: parsed?.resourceLimits?.memoryMb ?? DEFAULT_SETTINGS.docker.resourceLimits.memoryMb,
+      },
+      networkMode: parsed?.networkMode ?? DEFAULT_SETTINGS.docker.networkMode,
+    };
+  }
+
+  private mergeSlackSettings(parsed?: Partial<SlackSettings>): SlackSettings {
+    return {
+      enabled: parsed?.enabled ?? DEFAULT_SETTINGS.slack.enabled,
+      botToken: parsed?.botToken ?? DEFAULT_SETTINGS.slack.botToken,
+      appToken: parsed?.appToken ?? DEFAULT_SETTINGS.slack.appToken,
+      defaultChannelId: parsed?.defaultChannelId ?? DEFAULT_SETTINGS.slack.defaultChannelId,
+    };
+  }
+
+  private mergeScalarDefaults(parsed: Partial<GlobalSettings>): Pick<GlobalSettings,
+    'maxConcurrentAgents' | 'agentPromptTemplate' | 'sendWithCtrlEnter' | 'historyLimit' |
+    'enableDesktopNotifications' | 'appendSystemPrompt' | 'claudeMdMaxSizeKB' |
+    'chromeEnabled' | 'inventifyFolder'> {
     return {
       maxConcurrentAgents: parsed.maxConcurrentAgents ?? DEFAULT_SETTINGS.maxConcurrentAgents,
-      claudePermissions: {
-        dangerouslySkipPermissions: parsedPerms?.dangerouslySkipPermissions ?? DEFAULT_SETTINGS.claudePermissions.dangerouslySkipPermissions,
-        allowedTools: parsedPerms?.allowedTools ?? DEFAULT_SETTINGS.claudePermissions.allowedTools,
-        allowRules: parsedPerms?.allowRules ?? DEFAULT_SETTINGS.claudePermissions.allowRules,
-        askRules: parsedPerms?.askRules ?? DEFAULT_SETTINGS.claudePermissions.askRules,
-        denyRules: parsedPerms?.denyRules ?? DEFAULT_SETTINGS.claudePermissions.denyRules,
-        defaultMode: parsedPerms?.defaultMode ?? DEFAULT_SETTINGS.claudePermissions.defaultMode,
-      },
       agentPromptTemplate: parsed.agentPromptTemplate ?? DEFAULT_SETTINGS.agentPromptTemplate,
       sendWithCtrlEnter: parsed.sendWithCtrlEnter ?? DEFAULT_SETTINGS.sendWithCtrlEnter,
       historyLimit: parsed.historyLimit ?? DEFAULT_SETTINGS.historyLimit,
       enableDesktopNotifications: parsed.enableDesktopNotifications ?? DEFAULT_SETTINGS.enableDesktopNotifications,
       appendSystemPrompt: parsed.appendSystemPrompt ?? DEFAULT_SETTINGS.appendSystemPrompt,
       claudeMdMaxSizeKB: parsed.claudeMdMaxSizeKB ?? DEFAULT_SETTINGS.claudeMdMaxSizeKB,
-      agentLimits: {
-        maxTurns: parsedLimits?.maxTurns ?? DEFAULT_SETTINGS.agentLimits.maxTurns,
-      },
-      agentStreaming: {
-        includePartialMessages: parsedStreaming?.includePartialMessages ?? DEFAULT_SETTINGS.agentStreaming.includePartialMessages,
-        noSessionPersistence: parsedStreaming?.noSessionPersistence ?? DEFAULT_SETTINGS.agentStreaming.noSessionPersistence,
-      },
-      promptTemplates: this.mergeTemplates(parsed.promptTemplates),
-      ralphLoop: {
-        defaultMaxTurns: parsedRalphLoop?.defaultMaxTurns ?? DEFAULT_SETTINGS.ralphLoop.defaultMaxTurns,
-        // Migrate old model IDs to new defaults
-        defaultWorkerModel: this.migrateOldModelId(parsedRalphLoop?.defaultWorkerModel) ?? DEFAULT_SETTINGS.ralphLoop.defaultWorkerModel,
-        defaultReviewerModel: this.migrateOldModelId(parsedRalphLoop?.defaultReviewerModel) ?? DEFAULT_SETTINGS.ralphLoop.defaultReviewerModel,
-        defaultWorkerSystemPrompt: parsedRalphLoop?.defaultWorkerSystemPrompt ?? DEFAULT_SETTINGS.ralphLoop.defaultWorkerSystemPrompt,
-        defaultReviewerSystemPrompt: parsedRalphLoop?.defaultReviewerSystemPrompt ?? DEFAULT_SETTINGS.ralphLoop.defaultReviewerSystemPrompt,
-        historyLimit: parsedRalphLoop?.historyLimit ?? DEFAULT_SETTINGS.ralphLoop.historyLimit,
-      },
-      mcp: {
-        enabled: parsedMcp?.enabled ?? DEFAULT_SETTINGS.mcp.enabled,
-        servers: parsedMcp?.servers ?? DEFAULT_SETTINGS.mcp.servers,
-      },
-      slack: {
-        enabled: parsedSlack?.enabled ?? DEFAULT_SETTINGS.slack.enabled,
-        botToken: parsedSlack?.botToken ?? DEFAULT_SETTINGS.slack.botToken,
-        appToken: parsedSlack?.appToken ?? DEFAULT_SETTINGS.slack.appToken,
-        defaultChannelId: parsedSlack?.defaultChannelId ?? DEFAULT_SETTINGS.slack.defaultChannelId,
-      },
       chromeEnabled: parsed.chromeEnabled ?? DEFAULT_SETTINGS.chromeEnabled,
       inventifyFolder: parsed.inventifyFolder ?? DEFAULT_SETTINGS.inventifyFolder,
-      docker: {
-        enabled: parsedDocker?.enabled ?? DEFAULT_SETTINGS.docker.enabled,
-        baseImage: parsedDocker?.baseImage ?? DEFAULT_SETTINGS.docker.baseImage,
-        resourceLimits: {
-          cpus: parsedDocker?.resourceLimits?.cpus ?? DEFAULT_SETTINGS.docker.resourceLimits.cpus,
-          memoryMb: parsedDocker?.resourceLimits?.memoryMb ?? DEFAULT_SETTINGS.docker.resourceLimits.memoryMb,
-        },
-        networkMode: parsedDocker?.networkMode ?? DEFAULT_SETTINGS.docker.networkMode,
+    };
+  }
+
+  private mergeWithDefaults(parsed: Partial<GlobalSettings>): GlobalSettings {
+    return {
+      ...this.mergeScalarDefaults(parsed),
+      claudePermissions: this.mergePermissions(parsed.claudePermissions),
+      agentLimits: {
+        maxTurns: parsed.agentLimits?.maxTurns ?? DEFAULT_SETTINGS.agentLimits.maxTurns,
       },
+      agentStreaming: {
+        includePartialMessages: parsed.agentStreaming?.includePartialMessages ?? DEFAULT_SETTINGS.agentStreaming.includePartialMessages,
+        noSessionPersistence: parsed.agentStreaming?.noSessionPersistence ?? DEFAULT_SETTINGS.agentStreaming.noSessionPersistence,
+      },
+      promptTemplates: this.mergeTemplates(parsed.promptTemplates),
+      ralphLoop: this.mergeRalphLoopSettings(parsed.ralphLoop),
+      mcp: {
+        enabled: parsed.mcp?.enabled ?? DEFAULT_SETTINGS.mcp.enabled,
+        servers: parsed.mcp?.servers ?? DEFAULT_SETTINGS.mcp.servers,
+      },
+      slack: this.mergeSlackSettings(parsed.slack),
+      docker: this.mergeDockerSettings(parsed.docker),
       agentProfiles: this.mergeProfiles(parsed.agentProfiles),
     };
   }
@@ -633,16 +649,9 @@ export class FileSettingsRepository implements SettingsRepository {
     return Promise.resolve({ ...this.settings });
   }
 
-  update(updates: SettingsUpdate): Promise<GlobalSettings> {
+  private updateCoreScalars(updates: SettingsUpdate): void {
     if (updates.maxConcurrentAgents !== undefined) {
       this.settings.maxConcurrentAgents = Math.max(1, updates.maxConcurrentAgents);
-    }
-
-    if (updates.claudePermissions) {
-      this.settings.claudePermissions = {
-        ...this.settings.claudePermissions,
-        ...updates.claudePermissions,
-      };
     }
 
     if (updates.agentPromptTemplate !== undefined) {
@@ -664,65 +673,11 @@ export class FileSettingsRepository implements SettingsRepository {
     if (updates.appendSystemPrompt !== undefined) {
       this.settings.appendSystemPrompt = updates.appendSystemPrompt;
     }
+  }
 
+  private updateExtendedScalars(updates: SettingsUpdate): void {
     if (updates.claudeMdMaxSizeKB !== undefined) {
       this.settings.claudeMdMaxSizeKB = Math.max(10, Math.min(500, updates.claudeMdMaxSizeKB));
-    }
-
-    if (updates.agentLimits) {
-      this.settings.agentLimits = {
-        ...this.settings.agentLimits,
-        ...updates.agentLimits,
-      };
-
-      // Ensure non-negative values
-      if (this.settings.agentLimits.maxTurns < 0) {
-        this.settings.agentLimits.maxTurns = 0;
-      }
-    }
-
-    if (updates.agentStreaming) {
-      this.settings.agentStreaming = {
-        ...this.settings.agentStreaming,
-        ...updates.agentStreaming,
-      };
-    }
-
-    if (updates.promptTemplates !== undefined) {
-      this.settings.promptTemplates = updates.promptTemplates;
-    }
-
-    if (updates.ralphLoop) {
-      this.settings.ralphLoop = {
-        ...this.settings.ralphLoop,
-        ...updates.ralphLoop,
-      };
-
-      // Ensure positive maxTurns
-      if (this.settings.ralphLoop.defaultMaxTurns < 1) {
-        this.settings.ralphLoop.defaultMaxTurns = 1;
-      }
-
-      // Ensure reasonable history limit (1-50)
-      if (this.settings.ralphLoop.historyLimit < 1) {
-        this.settings.ralphLoop.historyLimit = 1;
-      } else if (this.settings.ralphLoop.historyLimit > 50) {
-        this.settings.ralphLoop.historyLimit = 50;
-      }
-    }
-
-    if (updates.mcp) {
-      this.settings.mcp = {
-        ...this.settings.mcp,
-        ...updates.mcp,
-      };
-    }
-
-    if (updates.slack) {
-      this.settings.slack = {
-        ...this.settings.slack,
-        ...updates.slack,
-      };
     }
 
     if (updates.chromeEnabled !== undefined) {
@@ -733,23 +688,72 @@ export class FileSettingsRepository implements SettingsRepository {
       this.settings.inventifyFolder = updates.inventifyFolder;
     }
 
+    if (updates.promptTemplates !== undefined) {
+      this.settings.promptTemplates = updates.promptTemplates;
+    }
+
     if (updates.agentProfiles !== undefined) {
       this.settings.agentProfiles = updates.agentProfiles;
     }
+  }
+
+  private updateObjectFields(updates: SettingsUpdate): void {
+    if (updates.claudePermissions) {
+      this.settings.claudePermissions = { ...this.settings.claudePermissions, ...updates.claudePermissions };
+    }
+
+    if (updates.agentStreaming) {
+      this.settings.agentStreaming = { ...this.settings.agentStreaming, ...updates.agentStreaming };
+    }
+
+    if (updates.mcp) {
+      this.settings.mcp = { ...this.settings.mcp, ...updates.mcp };
+    }
+
+    if (updates.slack) {
+      this.settings.slack = { ...this.settings.slack, ...updates.slack };
+    }
+  }
+
+  private updateRalphLoopFields(ralphLoop: Partial<RalphLoopSettings>): void {
+    this.settings.ralphLoop = { ...this.settings.ralphLoop, ...ralphLoop };
+    this.settings.ralphLoop.defaultMaxTurns = Math.max(1, this.settings.ralphLoop.defaultMaxTurns);
+    this.settings.ralphLoop.historyLimit = Math.max(1, Math.min(50, this.settings.ralphLoop.historyLimit));
+  }
+
+  private updateAgentLimits(agentLimits: Partial<AgentLimitsSettings>): void {
+    this.settings.agentLimits = { ...this.settings.agentLimits, ...agentLimits };
+    this.settings.agentLimits.maxTurns = Math.max(0, this.settings.agentLimits.maxTurns);
+  }
+
+  private updateDockerFields(docker: Partial<DockerSettings>): void {
+    this.settings.docker = {
+      ...this.settings.docker,
+      ...docker,
+      resourceLimits: {
+        ...this.settings.docker.resourceLimits,
+        ...(docker.resourceLimits || {}),
+      },
+    };
+    this.settings.docker.resourceLimits.cpus = Math.max(0.5, Math.min(16, this.settings.docker.resourceLimits.cpus));
+    this.settings.docker.resourceLimits.memoryMb = Math.max(512, Math.min(32768, this.settings.docker.resourceLimits.memoryMb));
+  }
+
+  update(updates: SettingsUpdate): Promise<GlobalSettings> {
+    this.updateCoreScalars(updates);
+    this.updateExtendedScalars(updates);
+    this.updateObjectFields(updates);
+
+    if (updates.agentLimits) {
+      this.updateAgentLimits(updates.agentLimits);
+    }
+
+    if (updates.ralphLoop) {
+      this.updateRalphLoopFields(updates.ralphLoop);
+    }
 
     if (updates.docker) {
-      this.settings.docker = {
-        ...this.settings.docker,
-        ...updates.docker,
-        resourceLimits: {
-          ...this.settings.docker.resourceLimits,
-          ...(updates.docker.resourceLimits || {}),
-        },
-      };
-
-      // Clamp resource limits to reasonable values
-      this.settings.docker.resourceLimits.cpus = Math.max(0.5, Math.min(16, this.settings.docker.resourceLimits.cpus));
-      this.settings.docker.resourceLimits.memoryMb = Math.max(512, Math.min(32768, this.settings.docker.resourceLimits.memoryMb));
+      this.updateDockerFields(updates.docker);
     }
 
     this.saveToFile();

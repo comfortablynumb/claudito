@@ -601,6 +601,227 @@ describe('ClaudeRoadmapGenerator', () => {
       expect(messages.some((m) => m.content === 'Split text')).toBe(true);
     });
 
+    it('should parse tool_use in assistant message content', async () => {
+      const messages: RoadmapMessage[] = [];
+      generator.on('message', (_projectId, message) => {
+        messages.push(message);
+      });
+
+      const generatePromise = generator.generate({
+        projectId: 'test-project',
+        projectPath: '/test/path',
+        projectName: 'Test Project',
+        prompt: 'Create a roadmap',
+      });
+
+      await new Promise(resolve => setImmediate(resolve));
+
+      const event = JSON.stringify({
+        type: 'assistant',
+        message: {
+          content: [
+            { type: 'text', text: 'I will write the file' },
+            { type: 'tool_use', name: 'Edit' },
+          ],
+        },
+      });
+      mockProcess.stdout.emit('data', Buffer.from(event + '\n'));
+
+      await mockProcess.close(0);
+      await generatePromise;
+
+      expect(messages.some((m) => m.content === 'Using tool: Edit')).toBe(true);
+      expect(messages.some((m) => m.content === 'I will write the file')).toBe(true);
+    });
+
+    it('should handle result event type', async () => {
+      const messages: RoadmapMessage[] = [];
+      generator.on('message', (_projectId, message) => {
+        messages.push(message);
+      });
+
+      const generatePromise = generator.generate({
+        projectId: 'test-project',
+        projectPath: '/test/path',
+        projectName: 'Test Project',
+        prompt: 'Create a roadmap',
+      });
+
+      await new Promise(resolve => setImmediate(resolve));
+
+      const event = JSON.stringify({ type: 'result', subtype: 'success' });
+      mockProcess.stdout.emit('data', Buffer.from(event + '\n'));
+
+      await mockProcess.close(0);
+      await generatePromise;
+
+      // result event logs internally but doesn't emit a message
+      // Should not throw and should complete normally
+    });
+
+    it('should handle system event type', async () => {
+      const generatePromise = generator.generate({
+        projectId: 'test-project',
+        projectPath: '/test/path',
+        projectName: 'Test Project',
+        prompt: 'Create a roadmap',
+      });
+
+      await new Promise(resolve => setImmediate(resolve));
+
+      const event = JSON.stringify({ type: 'system', session_id: 'abc123' });
+      mockProcess.stdout.emit('data', Buffer.from(event + '\n'));
+
+      await mockProcess.close(0);
+      await generatePromise;
+      // system event is silently handled — no error
+    });
+
+    it('should handle user event type', async () => {
+      const generatePromise = generator.generate({
+        projectId: 'test-project',
+        projectPath: '/test/path',
+        projectName: 'Test Project',
+        prompt: 'Create a roadmap',
+      });
+
+      await new Promise(resolve => setImmediate(resolve));
+
+      const event = JSON.stringify({ type: 'user' });
+      mockProcess.stdout.emit('data', Buffer.from(event + '\n'));
+
+      await mockProcess.close(0);
+      await generatePromise;
+      // user event is silently handled — no error
+    });
+
+    it('should handle unknown event type', async () => {
+      const generatePromise = generator.generate({
+        projectId: 'test-project',
+        projectPath: '/test/path',
+        projectName: 'Test Project',
+        prompt: 'Create a roadmap',
+      });
+
+      await new Promise(resolve => setImmediate(resolve));
+
+      const event = JSON.stringify({ type: 'ping', data: 'keepalive' });
+      mockProcess.stdout.emit('data', Buffer.from(event + '\n'));
+
+      await mockProcess.close(0);
+      await generatePromise;
+      // unknown event type is logged and silently skipped
+    });
+
+    it('should handle non-object JSON as plain text', async () => {
+      const messages: RoadmapMessage[] = [];
+      generator.on('message', (_projectId, message) => {
+        messages.push(message);
+      });
+
+      const generatePromise = generator.generate({
+        projectId: 'test-project',
+        projectPath: '/test/path',
+        projectName: 'Test Project',
+        prompt: 'Create a roadmap',
+      });
+
+      await new Promise(resolve => setImmediate(resolve));
+
+      // JSON number — valid JSON but not an object
+      mockProcess.stdout.emit('data', Buffer.from('42\n'));
+      // JSON string
+      mockProcess.stdout.emit('data', Buffer.from('"hello"\n'));
+
+      await mockProcess.close(0);
+      await generatePromise;
+
+      expect(messages.some((m) => m.content === '42')).toBe(true);
+      expect(messages.some((m) => m.content === '"hello"')).toBe(true);
+    });
+
+    it('should handle content_block_delta without text', async () => {
+      const generatePromise = generator.generate({
+        projectId: 'test-project',
+        projectPath: '/test/path',
+        projectName: 'Test Project',
+        prompt: 'Create a roadmap',
+      });
+
+      await new Promise(resolve => setImmediate(resolve));
+
+      const event = JSON.stringify({ type: 'content_block_delta', delta: {} });
+      mockProcess.stdout.emit('data', Buffer.from(event + '\n'));
+
+      await mockProcess.close(0);
+      await generatePromise;
+      // No crash when delta has no text
+    });
+
+    it('should handle content_block_start with non-tool_use type', async () => {
+      const messages: RoadmapMessage[] = [];
+      generator.on('message', (_projectId, message) => {
+        messages.push(message);
+      });
+
+      const generatePromise = generator.generate({
+        projectId: 'test-project',
+        projectPath: '/test/path',
+        projectName: 'Test Project',
+        prompt: 'Create a roadmap',
+      });
+
+      await new Promise(resolve => setImmediate(resolve));
+
+      const event = JSON.stringify({
+        type: 'content_block_start',
+        content_block: { type: 'text' },
+      });
+      mockProcess.stdout.emit('data', Buffer.from(event + '\n'));
+
+      await mockProcess.close(0);
+      await generatePromise;
+
+      // text content_block_start should not emit "Using tool" message
+      expect(messages.some((m) => m.content.includes('Using tool'))).toBe(false);
+    });
+
+    it('should handle assistant message without content', async () => {
+      const generatePromise = generator.generate({
+        projectId: 'test-project',
+        projectPath: '/test/path',
+        projectName: 'Test Project',
+        prompt: 'Create a roadmap',
+      });
+
+      await new Promise(resolve => setImmediate(resolve));
+
+      const event = JSON.stringify({ type: 'assistant', message: {} });
+      mockProcess.stdout.emit('data', Buffer.from(event + '\n'));
+
+      await mockProcess.close(0);
+      await generatePromise;
+      // No crash when assistant message has no content array
+    });
+
+    it('should handle empty line in stream', async () => {
+      const generatePromise = generator.generate({
+        projectId: 'test-project',
+        projectPath: '/test/path',
+        projectName: 'Test Project',
+        prompt: 'Create a roadmap',
+      });
+
+      await new Promise(resolve => setImmediate(resolve));
+
+      // Send data with empty lines
+      mockProcess.stdout.emit('data', Buffer.from('\n\n'));
+
+      await mockProcess.close(0);
+      await generatePromise;
+      // Empty lines should be silently skipped
+    });
+
     it('should process remaining buffer on close', async () => {
       const messages: RoadmapMessage[] = [];
       generator.on('message', (_projectId, message) => {

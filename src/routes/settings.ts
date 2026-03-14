@@ -100,110 +100,112 @@ export function createSettingsRouter(deps: SettingsRouterDependencies): Router {
 
   router.put('/', asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const body = req.body as UpdateSettingsBody;
-    const { maxConcurrentAgents, claudePermissions, agentPromptTemplate, sendWithCtrlEnter, historyLimit, enableDesktopNotifications, appendSystemPrompt, promptTemplates, mcp, slack, chromeEnabled, inventifyFolder, docker, agentProfiles } = body;
+    await validateSettingsBody(body, slackService);
 
-    if (maxConcurrentAgents !== undefined && (typeof maxConcurrentAgents !== 'number' || maxConcurrentAgents < 1)) {
-      throw new ValidationError('maxConcurrentAgents must be a positive number');
-    }
-
-    if (claudePermissions) {
-      validatePermissionRules(claudePermissions.allowRules, 'allowRules');
-      validatePermissionRules(claudePermissions.denyRules, 'denyRules');
-      validatePermissionRules(claudePermissions.askRules, 'askRules');
-    }
-
-    if (promptTemplates !== undefined) {
-      validatePromptTemplates(promptTemplates);
-    }
-
-    if (mcp?.servers) {
-      validateMcpServers(mcp.servers);
-    }
-
-    if (docker) {
-      validateDockerSettings(docker);
-    }
-
-    if (agentProfiles !== undefined) {
-      validateAgentProfiles(agentProfiles);
-    }
-
-    if (slack?.botToken && slack.botToken.trim()) {
-      if (!slackService) {
-        throw new ValidationError('Slack service not available');
-      }
-
-      const validation = await slackService.validateBotToken(slack.botToken.trim());
-
-      if (!validation.valid) {
-        throw new ValidationError('Invalid bot token: ' + (validation.error ?? 'authentication failed'));
-      }
-    }
-
-    // Trim Slack token values before saving
-    const slackPayload = slack ? {
-      ...slack,
-      ...(slack.botToken !== undefined && { botToken: slack.botToken.trim() }),
-      ...(slack.appToken !== undefined && { appToken: slack.appToken.trim() }),
-    } : undefined;
-
-    // Get current settings to detect changes
+    const slackPayload = buildSlackPayload(body.slack);
     const currentSettings = await settingsRepository.get();
-    const appendSystemPromptChanged = appendSystemPrompt !== undefined &&
-      appendSystemPrompt !== currentSettings.appendSystemPrompt;
-
-    const mcpChanged = mcp !== undefined &&
-      JSON.stringify(mcp) !== JSON.stringify(currentSettings.mcp);
-
-    const slackChanged = slackPayload !== undefined &&
-      JSON.stringify(slackPayload) !== JSON.stringify(currentSettings.slack);
+    const changeEvent = detectChanges(body, slackPayload, currentSettings);
 
     const updated = await settingsRepository.update({
-      maxConcurrentAgents,
-      claudePermissions,
-      agentPromptTemplate,
-      sendWithCtrlEnter,
-      historyLimit,
-      enableDesktopNotifications,
-      appendSystemPrompt,
-      promptTemplates,
-      mcp,
+      ...buildUpdatePayload(body),
       slack: slackPayload,
-      chromeEnabled,
-      inventifyFolder,
-      docker,
-      agentProfiles,
     });
 
-    // Notify about settings changes
-    if (onSettingsChange) {
-      const changeEvent: SettingsChangeEvent = {};
-
-      if (maxConcurrentAgents !== undefined) {
-        changeEvent.maxConcurrentAgents = maxConcurrentAgents;
-      }
-
-      if (appendSystemPromptChanged) {
-        changeEvent.appendSystemPromptChanged = true;
-      }
-
-      if (mcpChanged) {
-        changeEvent.mcpChanged = true;
-      }
-
-      if (slackChanged) {
-        changeEvent.slackChanged = true;
-      }
-
-      if (Object.keys(changeEvent).length > 0) {
-        onSettingsChange(changeEvent);
-      }
-    }
-
+    notifyChanges(changeEvent, onSettingsChange);
     res.json(updated);
   }));
 
   return router;
+}
+
+async function validateSettingsBody(body: UpdateSettingsBody, slackService?: SlackService): Promise<void> {
+  const { maxConcurrentAgents, claudePermissions, promptTemplates, mcp, docker, agentProfiles, slack } = body;
+
+  if (maxConcurrentAgents !== undefined && (typeof maxConcurrentAgents !== 'number' || maxConcurrentAgents < 1)) {
+    throw new ValidationError('maxConcurrentAgents must be a positive number');
+  }
+
+  if (claudePermissions) {
+    validatePermissionRules(claudePermissions.allowRules, 'allowRules');
+    validatePermissionRules(claudePermissions.denyRules, 'denyRules');
+    validatePermissionRules(claudePermissions.askRules, 'askRules');
+  }
+
+  if (promptTemplates !== undefined) {
+    validatePromptTemplates(promptTemplates);
+  }
+
+  if (mcp?.servers) {
+    validateMcpServers(mcp.servers);
+  }
+
+  if (docker) {
+    validateDockerSettings(docker);
+  }
+
+  if (agentProfiles !== undefined) {
+    validateAgentProfiles(agentProfiles);
+  }
+
+  if (slack?.botToken && slack.botToken.trim()) {
+    if (!slackService) {
+      throw new ValidationError('Slack service not available');
+    }
+
+    const validation = await slackService.validateBotToken(slack.botToken.trim());
+
+    if (!validation.valid) {
+      throw new ValidationError('Invalid bot token: ' + (validation.error ?? 'authentication failed'));
+    }
+  }
+}
+
+function buildSlackPayload(slack: Partial<SlackSettings> | undefined): Partial<SlackSettings> | undefined {
+  if (!slack) return undefined;
+
+  return {
+    ...slack,
+    ...(slack.botToken !== undefined && { botToken: slack.botToken.trim() }),
+    ...(slack.appToken !== undefined && { appToken: slack.appToken.trim() }),
+  };
+}
+
+function buildUpdatePayload(body: UpdateSettingsBody): Omit<UpdateSettingsBody, 'slack'> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { slack: _, ...rest } = body;
+  return rest;
+}
+
+function detectChanges(
+  body: UpdateSettingsBody,
+  slackPayload: Partial<SlackSettings> | undefined,
+  currentSettings: { appendSystemPrompt?: string; mcp?: unknown; slack?: unknown },
+): SettingsChangeEvent {
+  const changeEvent: SettingsChangeEvent = {};
+
+  if (body.maxConcurrentAgents !== undefined) {
+    changeEvent.maxConcurrentAgents = body.maxConcurrentAgents;
+  }
+
+  if (body.appendSystemPrompt !== undefined && body.appendSystemPrompt !== currentSettings.appendSystemPrompt) {
+    changeEvent.appendSystemPromptChanged = true;
+  }
+
+  if (body.mcp !== undefined && JSON.stringify(body.mcp) !== JSON.stringify(currentSettings.mcp)) {
+    changeEvent.mcpChanged = true;
+  }
+
+  if (slackPayload !== undefined && JSON.stringify(slackPayload) !== JSON.stringify(currentSettings.slack)) {
+    changeEvent.slackChanged = true;
+  }
+
+  return changeEvent;
+}
+
+function notifyChanges(changeEvent: SettingsChangeEvent, onSettingsChange?: (event: SettingsChangeEvent) => void): void {
+  if (onSettingsChange && Object.keys(changeEvent).length > 0) {
+    onSettingsChange(changeEvent);
+  }
 }
 
 function validatePermissionRules(rules: string[] | undefined, fieldName: string): void {
@@ -310,43 +312,49 @@ function validateAgentProfiles(profiles: unknown): void {
   let defaultCount = 0;
 
   for (const profile of profiles) {
-    if (typeof profile !== 'object' || profile === null) {
-      throw new ValidationError('Each profile must be an object');
-    }
-
-    const p = profile as Record<string, unknown>;
-
-    if (typeof p.id !== 'string' || p.id.trim().length === 0) {
-      throw new ValidationError('Each profile must have a non-empty id');
-    }
-
-    if (seenIds.has(p.id)) {
-      throw new ValidationError(`Duplicate profile id: ${p.id}`);
-    }
-    seenIds.add(p.id);
-
-    if (typeof p.name !== 'string' || p.name.trim().length === 0) {
-      throw new ValidationError('Each profile must have a non-empty name');
-    }
-
-    if (!VALID_PROVIDERS.includes(p.provider as string)) {
-      throw new ValidationError('Profile provider must be "anthropic" or "opencode"');
-    }
+    const p = validateSingleProfile(profile, seenIds);
 
     if (p.isDefault === true) {
       defaultCount++;
-    }
-
-    if (p.provider === 'anthropic') {
-      validateAnthropicConfig(p.anthropicConfig);
-    } else if (p.provider === 'opencode') {
-      validateOpencodeConfig(p.opencodeConfig);
     }
   }
 
   if (defaultCount !== 1) {
     throw new ValidationError('Exactly one profile must be marked as default');
   }
+}
+
+function validateSingleProfile(profile: unknown, seenIds: Set<string>): Record<string, unknown> {
+  if (typeof profile !== 'object' || profile === null) {
+    throw new ValidationError('Each profile must be an object');
+  }
+
+  const p = profile as Record<string, unknown>;
+
+  if (typeof p.id !== 'string' || p.id.trim().length === 0) {
+    throw new ValidationError('Each profile must have a non-empty id');
+  }
+
+  if (seenIds.has(p.id)) {
+    throw new ValidationError(`Duplicate profile id: ${p.id}`);
+  }
+  seenIds.add(p.id);
+
+  if (typeof p.name !== 'string' || p.name.trim().length === 0) {
+    throw new ValidationError('Each profile must have a non-empty name');
+  }
+
+  if (!VALID_PROVIDERS.includes(p.provider as string)) {
+    throw new ValidationError('Profile provider must be "anthropic" or "opencode"');
+  }
+
+  if (p.provider === 'anthropic') {
+    validateAnthropicConfig(p.anthropicConfig);
+  } else if (p.provider === 'opencode') {
+    validateOpencodeConfig(p.opencodeConfig);
+  }
+
+  return p;
 }
 
 function validateAnthropicConfig(config: unknown): void {

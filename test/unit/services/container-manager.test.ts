@@ -474,4 +474,59 @@ describe('DefaultContainerManager', () => {
       expect(dockerService.copyToContainer).not.toHaveBeenCalled();
     });
   });
+
+  describe('found-container failure fallback', () => {
+    it('should fall through to create new container when found container cannot be reattached', async () => {
+      const foundContainer: ContainerInfo = {
+        ...sampleContainerInfo,
+        containerId: 'found-but-broken',
+        status: 'stopped',
+      };
+
+      // No tracked container, but findExistingContainer returns one
+      dockerService.isContainerRunning.mockResolvedValue(false);
+      dockerService.listContainers.mockResolvedValue([foundContainer]);
+      dockerService.getContainerStatus.mockResolvedValue(foundContainer);
+
+      // handleFoundContainer will try to start the stopped container — make it fail
+      dockerService.startContainer
+        .mockRejectedValueOnce(new Error('Container is corrupted'))
+        .mockResolvedValue(undefined);
+
+      // Fall through to createNewContainer
+      const newId = 'fresh-container-id';
+      dockerService.createContainer.mockResolvedValue(newId);
+
+      const result = await manager.ensureContainer(projectId, projectPath);
+
+      expect(result.containerId).toBe(newId);
+      expect(result.wasCreated).toBe(true);
+      expect(dockerService.createContainer).toHaveBeenCalled();
+    });
+
+    it('should handle non-Error thrown from found container reattach', async () => {
+      const foundContainer: ContainerInfo = {
+        ...sampleContainerInfo,
+        containerId: 'found-string-error',
+        status: 'stopped',
+      };
+
+      dockerService.isContainerRunning.mockResolvedValue(false);
+      dockerService.listContainers.mockResolvedValue([foundContainer]);
+      dockerService.getContainerStatus.mockResolvedValue(foundContainer);
+
+      // Throw a non-Error value
+      dockerService.startContainer
+        .mockRejectedValueOnce('string error')
+        .mockResolvedValue(undefined);
+
+      const newId = 'fallback-container';
+      dockerService.createContainer.mockResolvedValue(newId);
+
+      const result = await manager.ensureContainer(projectId, projectPath);
+
+      expect(result.containerId).toBe(newId);
+      expect(result.wasCreated).toBe(true);
+    });
+  });
 });
