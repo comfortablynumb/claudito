@@ -5,26 +5,24 @@ import { ValidationError } from '../utils/errors';
  * Validation rules for common request parameters
  */
 
-// String validation
-export function validateString(value: unknown, fieldName: string, options?: {
+function checkNilValue(value: unknown, fieldName: string, required?: boolean): boolean {
+  if (value !== undefined && value !== null) {
+    return false;
+  }
+
+  if (required) {
+    throw new ValidationError(`${fieldName} is required`);
+  }
+
+  return true;
+}
+
+function checkStringConstraints(str: string, fieldName: string, options?: {
   minLength?: number;
   maxLength?: number;
   pattern?: RegExp;
   required?: boolean;
-}): string | undefined {
-  if (value === undefined || value === null) {
-    if (options?.required) {
-      throw new ValidationError(`${fieldName} is required`);
-    }
-    return undefined;
-  }
-
-  if (typeof value !== 'string') {
-    throw new ValidationError(`${fieldName} must be a string`);
-  }
-
-  const str = value.trim();
-
+}): void {
   if (options?.required && str.length === 0) {
     throw new ValidationError(`${fieldName} cannot be empty`);
   }
@@ -40,30 +38,13 @@ export function validateString(value: unknown, fieldName: string, options?: {
   if (options?.pattern && !options.pattern.test(str)) {
     throw new ValidationError(`${fieldName} has invalid format`);
   }
-
-  return str;
 }
 
-// Number validation
-export function validateNumber(value: unknown, fieldName: string, options?: {
+function checkNumberConstraints(num: number, fieldName: string, options?: {
   min?: number;
   max?: number;
   integer?: boolean;
-  required?: boolean;
-}): number | undefined {
-  if (value === undefined || value === null) {
-    if (options?.required) {
-      throw new ValidationError(`${fieldName} is required`);
-    }
-    return undefined;
-  }
-
-  const num = typeof value === 'string' ? parseFloat(value) : value;
-
-  if (typeof num !== 'number' || isNaN(num)) {
-    throw new ValidationError(`${fieldName} must be a valid number`);
-  }
-
+}): void {
   if (options?.integer && !Number.isInteger(num)) {
     throw new ValidationError(`${fieldName} must be an integer`);
   }
@@ -75,7 +56,46 @@ export function validateNumber(value: unknown, fieldName: string, options?: {
   if (options?.max !== undefined && num > options.max) {
     throw new ValidationError(`${fieldName} must not exceed ${options.max}`);
   }
+}
 
+// String validation
+export function validateString(value: unknown, fieldName: string, options?: {
+  minLength?: number;
+  maxLength?: number;
+  pattern?: RegExp;
+  required?: boolean;
+}): string | undefined {
+  if (checkNilValue(value, fieldName, options?.required)) {
+    return undefined;
+  }
+
+  if (typeof value !== 'string') {
+    throw new ValidationError(`${fieldName} must be a string`);
+  }
+
+  const str = value.trim();
+  checkStringConstraints(str, fieldName, options);
+  return str;
+}
+
+// Number validation
+export function validateNumber(value: unknown, fieldName: string, options?: {
+  min?: number;
+  max?: number;
+  integer?: boolean;
+  required?: boolean;
+}): number | undefined {
+  if (checkNilValue(value, fieldName, options?.required)) {
+    return undefined;
+  }
+
+  const num = typeof value === 'string' ? parseFloat(value) : value;
+
+  if (typeof num !== 'number' || isNaN(num)) {
+    throw new ValidationError(`${fieldName} must be a valid number`);
+  }
+
+  checkNumberConstraints(num, fieldName, options);
   return num;
 }
 
