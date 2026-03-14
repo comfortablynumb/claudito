@@ -40,4 +40,18 @@ data/
 /nul
 
 # Claudito
-/.claudito.solito/
+/.claudito
+
+# Solito
+/.solito
+
+# Others
+
+/.c8*
+/calc-avg-complexity.js
+/cr-err.txt
+/cr-out.json
+/cr-settings.json
+/eslint-err.txt
+/eslint-output.json
+/measure-complexity.js

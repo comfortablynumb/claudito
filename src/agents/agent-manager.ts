@@ -25,6 +25,7 @@ import {
   ProjectRepository,
   ConversationRepository,
   SettingsRepository,
+  GlobalSettings,
   McpServerConfig,
   McpOverrides,
   ProjectStatus,
@@ -984,35 +985,13 @@ export class DefaultAgentManager implements AgentManager {
     }
 
     const oneOffId = `oneoff-${generateUUID()}`;
-
-    this.logger.info('Starting one-off agent', {
-      oneOffId,
-      projectId: options.projectId,
-    });
+    this.logger.info('Starting one-off agent', { oneOffId, projectId: options.projectId });
 
     const settings = await this.settingsRepository.get();
-    const projectOverrides = project.permissionOverrides ?? null;
-    const permArgs = this.permissionGenerator.generateArgs(settings.claudePermissions, projectOverrides);
-
-    const effectiveOneOffMode = options.permissionMode || permArgs.permissionMode;
-    const shouldSkipOneOff = effectiveOneOffMode !== 'plan' &&
-      (permArgs.skipPermissions || settings.claudePermissions.dangerouslySkipPermissions);
-
-    const permissionConfig: PermissionConfig = {
-      skipPermissions: shouldSkipOneOff,
-      allowedTools: shouldSkipOneOff ? [] : permArgs.allowedTools,
-      disallowedTools: shouldSkipOneOff ? [] : permArgs.disallowedTools,
-      permissionMode: effectiveOneOffMode,
-      appendSystemPrompt: options.appendSystemPrompt || settings.appendSystemPrompt,
-    };
-
+    const permissionConfig = this.resolveOneOffPermissions(settings, project, options);
     const model = await this.getModelForProject(options.projectId);
-
-    // Docker sandboxed execution
     const dockerResult = await this.getDockerProcessSpawner(
-      options.projectId,
-      project.path,
-      project.dockerImage ?? undefined,
+      options.projectId, project.path, project.dockerImage ?? undefined,
     );
 
     if (dockerResult.dockerFallback) {
@@ -1020,7 +999,6 @@ export class DefaultAgentManager implements AgentManager {
     }
 
     const agentProfile = await this.resolveProfileForProject(options.projectId);
-
     const agent = this.agentFactory.create({
       projectId: options.projectId,
       projectPath: project.path,
@@ -1032,28 +1010,56 @@ export class DefaultAgentManager implements AgentManager {
       agentProfile,
     });
 
+    this.registerOneOffAgent(oneOffId, agent, options);
+    agent.start(options.message);
+    this.recordOneOffCommand(oneOffId, agent, options);
+
+    return oneOffId;
+  }
+
+  private resolveOneOffPermissions(
+    settings: GlobalSettings,
+    project: ProjectStatus,
+    options: OneOffAgentOptions,
+  ): PermissionConfig {
+    const projectOverrides = project.permissionOverrides ?? null;
+    const permArgs = this.permissionGenerator.generateArgs(settings.claudePermissions, projectOverrides);
+    const effectiveMode = options.permissionMode || permArgs.permissionMode;
+    const shouldSkip = effectiveMode !== 'plan' &&
+      (permArgs.skipPermissions || settings.claudePermissions.dangerouslySkipPermissions);
+
+    return {
+      skipPermissions: shouldSkip,
+      allowedTools: shouldSkip ? [] : permArgs.allowedTools,
+      disallowedTools: shouldSkip ? [] : permArgs.disallowedTools,
+      permissionMode: effectiveMode,
+      appendSystemPrompt: options.appendSystemPrompt || settings.appendSystemPrompt,
+    };
+  }
+
+  private registerOneOffAgent(oneOffId: string, agent: Agent, options: OneOffAgentOptions): void {
     this.oneOffAgents.set(oneOffId, agent);
     this.oneOffMeta.set(oneOffId, {
       projectId: options.projectId,
       label: options.label || 'One-off Agent',
     });
     this.setupOneOffAgentListeners(oneOffId, agent);
-    agent.start(options.message);
+  }
 
+  private recordOneOffCommand(oneOffId: string, agent: Agent, options: OneOffAgentOptions): void {
     const cmd = agent.lastCommand;
 
-    if (cmd) {
-      const label = options.label || 'One-off Agent';
-      const entries = this.oneOffCommandHistory.get(options.projectId) ?? [];
-      entries.push({ label, command: cmd, timestamp: new Date().toISOString() });
-
-      if (entries.length > 50) entries.splice(0, entries.length - 50);
-      this.oneOffCommandHistory.set(options.projectId, entries);
-
-      this.recordCliCommand(options.projectId, label, cmd);
+    if (!cmd) {
+      return;
     }
 
-    return oneOffId;
+    const label = options.label || 'One-off Agent';
+    const entries = this.oneOffCommandHistory.get(options.projectId) ?? [];
+    entries.push({ label, command: cmd, timestamp: new Date().toISOString() });
+
+    if (entries.length > 50) entries.splice(0, entries.length - 50);
+    this.oneOffCommandHistory.set(options.projectId, entries);
+    this.recordCliCommand(options.projectId, label, cmd);
   }
 
   async stopOneOffAgent(oneOffId: string): Promise<void> {

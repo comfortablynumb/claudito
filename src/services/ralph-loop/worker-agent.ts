@@ -473,61 +473,61 @@ export class WorkerAgent {
   private handleStreamEvent(event: StreamEvent): void {
     this.updateUsageFromEvent(event);
 
-    // Debug logging for tool events
-    if (event.type === 'assistant' && event.message?.content) {
-      for (const block of event.message.content) {
-        if (block.type === 'tool_use') {
-          this.logger.debug('Worker detected tool_use in assistant event', {
-            toolName: block.name,
-            toolId: block.id,
-            hasInput: !!block.input,
-          });
-        }
+    switch (event.type) {
+      case 'assistant':
+        this.handleAssistantEvent(event);
+        break;
+
+      case 'content_block_delta':
+        this.handleDeltaEvent(event);
+        break;
+
+      case 'result':
+        this.logger.debug('Worker received result event', { subtype: event.subtype });
+        break;
+
+      case 'content_block_start':
+        this.handleContentBlockStartEvent(event);
+        break;
+    }
+  }
+
+  private handleAssistantEvent(event: StreamEvent): void {
+    const content = event.message?.content || [];
+
+    for (const block of content) {
+      if (block.type === 'tool_use') {
+        this.logger.debug('Worker detected tool_use in assistant event', {
+          toolName: block.name, toolId: block.id, hasInput: !!block.input,
+        });
+      }
+
+      if (block.type === 'text' && block.text) {
+        this.collectedOutput += block.text;
+        this.emitter.emit('output', block.text);
+      }
+
+      if (block.type === 'tool_use' && block.name) {
+        this.handleToolUse(block.name, block.input, block.id);
       }
     }
+  }
 
-    switch (event.type) {
-      case 'assistant': {
-        const content = event.message?.content || [];
+  private handleDeltaEvent(event: StreamEvent): void {
+    if (event.delta?.text) {
+      this.collectedOutput += event.delta.text;
+      this.emitter.emit('output', event.delta.text);
+    }
+  }
 
-        for (const block of content) {
-          if (block.type === 'text' && block.text) {
-            this.collectedOutput += block.text;
-            this.emitter.emit('output', block.text);
-          }
+  private handleContentBlockStartEvent(event: StreamEvent): void {
+    this.logger.debug('Worker received content_block_start', {
+      blockType: event.content_block?.type,
+      toolName: event.content_block?.name,
+    });
 
-          if (block.type === 'tool_use' && block.name) {
-            this.handleToolUse(block.name, block.input, block.id);
-          }
-        }
-        break;
-      }
-
-      case 'content_block_delta': {
-        if (event.delta?.text) {
-          this.collectedOutput += event.delta.text;
-          this.emitter.emit('output', event.delta.text);
-        }
-        break;
-      }
-
-      case 'result': {
-        this.logger.debug('Worker received result event', {
-          subtype: event.subtype,
-        });
-        break;
-      }
-
-      case 'content_block_start': {
-        this.logger.debug('Worker received content_block_start', {
-          blockType: event.content_block?.type,
-          toolName: event.content_block?.name,
-        });
-        if (event.content_block?.type === 'tool_use' && event.content_block.name) {
-          this.handleToolUse(event.content_block.name, event.content_block.input, event.content_block.id);
-        }
-        break;
-      }
+    if (event.content_block?.type === 'tool_use' && event.content_block.name) {
+      this.handleToolUse(event.content_block.name, event.content_block.input, event.content_block.id);
     }
   }
 

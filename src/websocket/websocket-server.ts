@@ -892,93 +892,10 @@ export class DefaultWebSocketServer implements ProjectWebSocketServer {
         return;
       }
 
-      // Convert Ralph Loop message to agent message format
-      let content = '';
-      let messageType: AgentMessage['type'] = 'system';
+      const message = this.buildRalphLoopMessage(type, data);
 
-      switch (type) {
-        case 'ralph_loop_output': {
-          // Changed from 'stdout' to 'stdout' to match frontend expectation
-          // Frontend converts this to 'assistant' type when displaying
-          messageType = 'stdout';
-          const outputData = data as unknown as RalphLoopOutputData;
-          content = outputData.content;
-          // Phase will be added to the message object below
-          break;
-        }
-
-        case 'ralph_loop_iteration': {
-          const iterationData = data as { iteration: number };
-          content = `--- Ralph Loop Iteration ${iterationData.iteration} started ---`;
-          break;
-        }
-
-        case 'ralph_loop_worker_complete': {
-          const workerData = data as unknown as RalphLoopWorkerCompleteData;
-          content = `Worker completed iteration ${workerData.summary.iterationNumber}`;
-          if (workerData.summary.filesModified?.length) {
-            content += `\nFiles modified: ${workerData.summary.filesModified.join(', ')}`;
-          }
-          break;
-        }
-
-        case 'ralph_loop_reviewer_complete': {
-          const reviewerData = data as unknown as RalphLoopReviewerCompleteData;
-          content = `Reviewer decision: ${reviewerData.feedback.decision}`;
-          if (reviewerData.feedback.feedback) {
-            content += `\nFeedback: ${reviewerData.feedback.feedback}`;
-          }
-          break;
-        }
-
-        case 'ralph_loop_complete': {
-          const completeData = data as unknown as RalphLoopCompleteData;
-          content = `Ralph Loop completed: ${completeData.finalStatus}`;
-          break;
-        }
-
-        case 'ralph_loop_error': {
-          const errorData = data as { error: string };
-          content = `Ralph Loop error: ${errorData.error}`;
-          break;
-        }
-
-        case 'ralph_loop_tool_use': {
-          // Tool use messages are handled differently - they have tool info
-          const toolData = data as unknown as RalphLoopToolUseData;
-          const toolMessage: AgentMessage = {
-            type: 'tool_use',
-            content: `${toolData.tool_name}`,
-            timestamp: toolData.timestamp || new Date().toISOString(),
-            toolInfo: {
-              name: toolData.tool_name,
-              id: toolData.tool_id,
-              input: toolData.parameters,
-            },
-            ralphLoopPhase: toolData.phase,
-          };
-          await this.conversationRepository.addMessage(
-            projectId,
-            project.currentConversationId,
-            toolMessage
-          );
-          return;
-        }
-
-        default:
-          return;
-      }
-
-      const message: AgentMessage = {
-        type: messageType,
-        content,
-        timestamp: (data.timestamp as string) || new Date().toISOString(),
-      };
-
-      // Add ralphLoopPhase for ralph_loop_output messages
-      if (type === 'ralph_loop_output') {
-        const outputData = data as unknown as RalphLoopOutputData;
-        message.ralphLoopPhase = outputData.phase;
+      if (!message) {
+        return;
       }
 
       await this.conversationRepository.addMessage(
@@ -993,6 +910,94 @@ export class DefaultWebSocketServer implements ProjectWebSocketServer {
         error: error instanceof Error ? error.message : 'Unknown error',
       });
     }
+  }
+
+  private buildRalphLoopMessage(
+    type: string,
+    data: Record<string, unknown>
+  ): AgentMessage | null {
+    switch (type) {
+      case 'ralph_loop_output':
+        return this.buildOutputMessage(data as unknown as RalphLoopOutputData);
+
+      case 'ralph_loop_iteration':
+        return this.buildSystemMessage(
+          `--- Ralph Loop Iteration ${(data as { iteration: number }).iteration} started ---`,
+          data
+        );
+
+      case 'ralph_loop_worker_complete':
+        return this.buildWorkerCompleteMessage(data as unknown as RalphLoopWorkerCompleteData);
+
+      case 'ralph_loop_reviewer_complete':
+        return this.buildReviewerCompleteMessage(data as unknown as RalphLoopReviewerCompleteData);
+
+      case 'ralph_loop_complete':
+        return this.buildSystemMessage(
+          `Ralph Loop completed: ${(data as unknown as RalphLoopCompleteData).finalStatus}`,
+          data
+        );
+
+      case 'ralph_loop_error':
+        return this.buildSystemMessage(`Ralph Loop error: ${(data as { error: string }).error}`, data);
+
+      case 'ralph_loop_tool_use':
+        return this.buildToolUseMessage(data as unknown as RalphLoopToolUseData);
+
+      default:
+        return null;
+    }
+  }
+
+  private buildOutputMessage(data: RalphLoopOutputData): AgentMessage {
+    return {
+      type: 'stdout',
+      content: data.content,
+      timestamp: (data as unknown as Record<string, unknown>).timestamp as string || new Date().toISOString(),
+      ralphLoopPhase: data.phase,
+    };
+  }
+
+  private buildSystemMessage(content: string, data: Record<string, unknown>): AgentMessage {
+    return {
+      type: 'system',
+      content,
+      timestamp: (data.timestamp as string) || new Date().toISOString(),
+    };
+  }
+
+  private buildWorkerCompleteMessage(data: RalphLoopWorkerCompleteData): AgentMessage {
+    let content = `Worker completed iteration ${data.summary.iterationNumber}`;
+
+    if (data.summary.filesModified?.length) {
+      content += `\nFiles modified: ${data.summary.filesModified.join(', ')}`;
+    }
+
+    return this.buildSystemMessage(content, data as unknown as Record<string, unknown>);
+  }
+
+  private buildReviewerCompleteMessage(data: RalphLoopReviewerCompleteData): AgentMessage {
+    let content = `Reviewer decision: ${data.feedback.decision}`;
+
+    if (data.feedback.feedback) {
+      content += `\nFeedback: ${data.feedback.feedback}`;
+    }
+
+    return this.buildSystemMessage(content, data as unknown as Record<string, unknown>);
+  }
+
+  private buildToolUseMessage(data: RalphLoopToolUseData): AgentMessage {
+    return {
+      type: 'tool_use',
+      content: `${data.tool_name}`,
+      timestamp: data.timestamp || new Date().toISOString(),
+      toolInfo: {
+        name: data.tool_name,
+        id: data.tool_id,
+        input: data.parameters,
+      },
+      ralphLoopPhase: data.phase,
+    };
   }
 
   getConnectedClients(projectId?: string): ConnectedClient[] {
