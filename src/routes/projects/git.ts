@@ -26,12 +26,25 @@ import {
   fileDiffQuerySchema
 } from './schemas';
 import { AgentManager, AgentManagerEvents } from '../../agents';
-import { ConversationRepository } from '../../repositories';
+import { ConversationRepository, ProjectRepository } from '../../repositories';
 import { GitService } from '../../services/git-service';
 
 const ONE_OFF_TIMEOUT_MS = 120000;
 const MAX_DIFF_LENGTH = 15000;
 const logger = getLogger('git-routes');
+
+async function requireProject(
+  projectRepository: ProjectRepository,
+  id: string
+): Promise<{ path: string }> {
+  const project = await projectRepository.findById(id);
+
+  if (!project) {
+    throw new NotFoundError('Project');
+  }
+
+  return project;
+}
 
 function buildCommitMessagePrompt(stagedFiles: string, diff: string): string {
   const truncatedDiff = diff.length > MAX_DIFF_LENGTH
@@ -223,101 +236,56 @@ export function createGitRouter(deps: ProjectRouterDependencies): Router {
 
   // Create a commit
   router.post('/commit', validateBody(gitCommitSchema), validateProjectExists(projectRepository), asyncHandler(async (req: Request, res: Response) => {
-    const id = req.params['id'] as string;
-    const body = req.body as GitCommitBody;
-    const { message } = body;
+    const project = await requireProject(projectRepository, req.params['id'] as string);
+    const { message } = req.body as GitCommitBody;
 
-
-    const project = await projectRepository.findById(id);
-
-    if (!project) {
-      throw new NotFoundError('Project');
-    }
-
-    const result = await gitService.commit((project).path, message!);
+    const result = await gitService.commit(project.path, message!);
     res.json(result);
   }));
 
   // Create a new branch
   router.post('/branch', validateBody(gitBranchSchema), validateProjectExists(projectRepository), asyncHandler(async (req: Request, res: Response) => {
-    const id = req.params['id'] as string;
-    const body = req.body as GitBranchBody;
-    const { name, checkout } = body;
+    const project = await requireProject(projectRepository, req.params['id'] as string);
+    const { name, checkout } = req.body as GitBranchBody;
 
-
-    const project = await projectRepository.findById(id);
-
-    if (!project) {
-      throw new NotFoundError('Project');
-    }
-
-    await gitService.createBranch((project).path, name!, checkout);
+    await gitService.createBranch(project.path, name!, checkout);
     res.json({ success: true });
   }));
 
   // Checkout a branch
   router.post('/checkout', validateBody(gitCheckoutSchema), validateProjectExists(projectRepository), asyncHandler(async (req: Request, res: Response) => {
-    const id = req.params['id'] as string;
-    const body = req.body as GitCheckoutBody;
-    const { branch } = body;
+    const project = await requireProject(projectRepository, req.params['id'] as string);
+    const { branch } = req.body as GitCheckoutBody;
 
-
-    const project = await projectRepository.findById(id);
-
-    if (!project) {
-      throw new NotFoundError('Project');
-    }
-
-    await gitService.checkout((project).path, branch!);
+    await gitService.checkout(project.path, branch!);
     res.json({ success: true });
   }));
 
   // Push to remote
   router.post('/push', validateBody(gitPushSchema), validateProjectExists(projectRepository), asyncHandler(async (req: Request, res: Response) => {
-    const id = req.params['id'] as string;
-    const body = req.body as GitPushBody;
-    const { remote = 'origin', branch, setUpstream } = body;
+    const project = await requireProject(projectRepository, req.params['id'] as string);
+    const { remote = 'origin', branch, setUpstream } = req.body as GitPushBody;
 
-    const project = await projectRepository.findById(id);
-
-    if (!project) {
-      throw new NotFoundError('Project');
-    }
-
-    const result = await gitService.push((project).path, remote, branch, setUpstream);
+    const result = await gitService.push(project.path, remote, branch, setUpstream);
     res.json(result);
   }));
 
   // Pull from remote
   router.post('/pull', validateBody(gitPullSchema), validateProjectExists(projectRepository), asyncHandler(async (req: Request, res: Response) => {
-    const id = req.params['id'] as string;
-    const body = req.body as GitPullBody;
-    const { remote = 'origin', branch, rebase } = body;
+    const project = await requireProject(projectRepository, req.params['id'] as string);
+    const { remote = 'origin', branch, rebase } = req.body as GitPullBody;
 
-    const project = await projectRepository.findById(id);
-
-    if (!project) {
-      throw new NotFoundError('Project');
-    }
-
-    const result = await gitService.pull((project).path, remote, branch, rebase);
+    const result = await gitService.pull(project.path, remote, branch, rebase);
     res.json(result);
   }));
 
   // Get file diff
   router.get('/file-diff', validateQuery(fileDiffQuerySchema), validateProjectExists(projectRepository), asyncHandler(async (req: Request, res: Response) => {
-    const id = req.params['id'] as string;
+    const project = await requireProject(projectRepository, req.params['id'] as string);
     const filePath = req.query['path'] as string;
     const staged = req.query['staged'] === 'true';
 
-
-    const project = await projectRepository.findById(id);
-
-    if (!project) {
-      throw new NotFoundError('Project');
-    }
-
-    const { diff } = await gitService.getFileDiff((project).path, filePath, staged);
+    const { diff } = await gitService.getFileDiff(project.path, filePath, staged);
     res.json({ filePath, diff });
   }));
 
@@ -341,35 +309,20 @@ export function createGitRouter(deps: ProjectRouterDependencies): Router {
 
   // Create a tag
   router.post('/tags', validateBody(gitTagSchema), validateProjectExists(projectRepository), asyncHandler(async (req: Request, res: Response) => {
-    const id = req.params['id'] as string;
-    const body = req.body as GitTagBody;
-    const { name, message } = body;
+    const project = await requireProject(projectRepository, req.params['id'] as string);
+    const { name, message } = req.body as GitTagBody;
 
-
-    const project = await projectRepository.findById(id);
-
-    if (!project) {
-      throw new NotFoundError('Project');
-    }
-
-    await gitService.createTag((project).path, name, message);
+    await gitService.createTag(project.path, name, message);
     res.json({ success: true });
   }));
 
   // Push a tag to remote
   router.post('/tags/:name/push', validateParams(projectAndTagNameSchema), validateBody(gitPushTagSchema), validateProjectExists(projectRepository), asyncHandler(async (req: Request, res: Response) => {
-    const id = req.params['id'] as string;
+    const project = await requireProject(projectRepository, req.params['id'] as string);
     const tagName = req.params['name'] as string;
-    const body = req.body as GitPushTagBody;
-    const { remote = 'origin' } = body;
+    const { remote = 'origin' } = req.body as GitPushTagBody;
 
-    const project = await projectRepository.findById(id);
-
-    if (!project) {
-      throw new NotFoundError('Project');
-    }
-
-    await gitService.pushTag((project).path, tagName, remote);
+    await gitService.pushTag(project.path, tagName, remote);
     res.json({ success: true });
   }));
 
@@ -383,9 +336,46 @@ export function createGitRouter(deps: ProjectRouterDependencies): Router {
   }));
 
   // Generate commit message using one-off agent
-  router.post('/generate-commit-message', validateProjectExists(projectRepository), asyncHandler(async (req: Request, res: Response) => {
+  router.post('/generate-commit-message', validateProjectExists(projectRepository), asyncHandler(
+    handleGenerateCommitMessage(gitService, agentManager)
+  ));
+
+  // Generate PR title and description using one-off agent
+  router.post('/generate-pr-description', validateProjectExists(projectRepository), asyncHandler(
+    handleGeneratePRDescription(gitService, agentManager, conversationRepository)
+  ));
+
+  // Get GitHub repo identifier from remote URL
+  router.get('/github-repo', validateProjectExists(projectRepository), asyncHandler(async (req: Request, res: Response) => {
     const project = req.project!;
-    const projectPath = (project).path;
+    const remoteUrl = await gitService.getRemoteUrl(project.path);
+
+    if (!remoteUrl) {
+      res.json({ repo: null });
+      return;
+    }
+
+    const repo = extractGitHubRepo(remoteUrl);
+    res.json({ repo });
+  }));
+
+  // Get git user name
+  router.get('/user-name', validateProjectExists(projectRepository), asyncHandler(async (req: Request, res: Response) => {
+    const project = req.project!;
+    const name = await gitService.getUserName(project.path);
+    res.json({ name });
+  }));
+
+  return router;
+}
+
+function handleGenerateCommitMessage(
+  gitService: GitService,
+  agentManager: AgentManager,
+): (req: Request, res: Response) => Promise<void> {
+  return async (req: Request, res: Response): Promise<void> => {
+    const project = req.project!;
+    const projectPath = project.path;
     const projectId = req.params['id'] as string;
 
     const status = await gitService.getStatus(projectPath);
@@ -417,10 +407,15 @@ export function createGitRouter(deps: ProjectRouterDependencies): Router {
         error: err instanceof Error ? err.message : 'Failed to generate commit message'
       });
     }
-  }));
+  };
+}
 
-  // Generate PR title and description using one-off agent
-  router.post('/generate-pr-description', validateProjectExists(projectRepository), asyncHandler(async (req: Request, res: Response) => {
+function handleGeneratePRDescription(
+  gitService: GitService,
+  agentManager: AgentManager,
+  conversationRepository: ConversationRepository,
+): (req: Request, res: Response) => Promise<void> {
+  return async (req: Request, res: Response): Promise<void> => {
     const project = req.project!;
     const projectPath = project.path;
     const projectId = req.params['id'] as string;
@@ -453,30 +448,7 @@ export function createGitRouter(deps: ProjectRouterDependencies): Router {
         error: err instanceof Error ? err.message : 'Failed to generate PR description'
       });
     }
-  }));
-
-  // Get GitHub repo identifier from remote URL
-  router.get('/github-repo', validateProjectExists(projectRepository), asyncHandler(async (req: Request, res: Response) => {
-    const project = req.project!;
-    const remoteUrl = await gitService.getRemoteUrl(project.path);
-
-    if (!remoteUrl) {
-      res.json({ repo: null });
-      return;
-    }
-
-    const repo = extractGitHubRepo(remoteUrl);
-    res.json({ repo });
-  }));
-
-  // Get git user name
-  router.get('/user-name', validateProjectExists(projectRepository), asyncHandler(async (req: Request, res: Response) => {
-    const project = req.project!;
-    const name = await gitService.getUserName(project.path);
-    res.json({ name });
-  }));
-
-  return router;
+  };
 }
 
 function extractGitHubRepo(remoteUrl: string): string | null {
