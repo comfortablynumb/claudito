@@ -346,6 +346,7 @@ describe('ProcessManager', () => {
   describe('stop - Windows taskkill', () => {
     beforeEach(() => {
       mockExecFile.mockClear();
+      pm = new ProcessManager(mockLogger, mockSpawner, 'win32');
     });
 
     it('should call taskkill with /F /T flags on stop', async () => {
@@ -414,6 +415,7 @@ describe('ProcessManager', () => {
   describe('kill - Windows taskkill', () => {
     beforeEach(() => {
       mockExecFile.mockClear();
+      pm = new ProcessManager(mockLogger, mockSpawner, 'win32');
     });
 
     it('should call taskkill on kill', () => {
@@ -489,7 +491,7 @@ describe('ProcessManager', () => {
         (_cmd: string, _args: string[], cb: (err: Error | null) => void) => cb(null)
       );
 
-      await ProcessManager.killProcess(5678);
+      await ProcessManager.killProcess(5678, 'SIGTERM', 'win32');
 
       expect(mockExecFile).toHaveBeenCalledWith(
         'taskkill',
@@ -504,7 +506,7 @@ describe('ProcessManager', () => {
           cb(new Error('process not found'))
       );
 
-      await expect(ProcessManager.killProcess(5678)).resolves.toBeUndefined();
+      await expect(ProcessManager.killProcess(5678, 'SIGTERM', 'win32')).resolves.toBeUndefined();
     });
   });
 
