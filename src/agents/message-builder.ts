@@ -142,45 +142,38 @@ export class MessageBuilder {
       return null;
     }
 
-    interface McpTransport {
-      type: string;
-      url?: string;
-      headers?: Record<string, string>;
-    }
-
     interface McpServerEntry {
+      type: 'stdio' | 'http';
       command?: string;
       args?: string[];
       env?: Record<string, string>;
-      transport?: McpTransport;
+      url?: string;
+      headers?: Record<string, string>;
     }
 
     // Build the config object
     const mcpServers: Record<string, McpServerEntry> = {};
 
     for (const server of servers) {
-      const serverConfig: McpServerEntry = {};
-
       if (server.type === 'stdio') {
-        serverConfig.command = server.command;
+        const serverConfig: McpServerEntry = { type: 'stdio', command: server.command };
+
         if (server.args && server.args.length > 0) {
           serverConfig.args = server.args;
         }
+
         if (server.env && Object.keys(server.env).length > 0) {
           serverConfig.env = server.env;
         }
+        mcpServers[server.name] = serverConfig;
       } else if (server.type === 'http') {
-        // For HTTP servers, we need to handle the URL and headers differently
-        serverConfig.transport = {
-          type: 'http',
-          url: server.url
-        };
-        if (server.headers && Object.keys(server.headers).length > 0) {
-          serverConfig.transport.headers = server.headers;
-        }
-      }
+        const serverConfig: McpServerEntry = { type: 'http', url: server.url };
 
-      mcpServers[server.name] = serverConfig;
+        if (server.headers && Object.keys(server.headers).length > 0) {
+          serverConfig.headers = server.headers;
+        }
+        mcpServers[server.name] = serverConfig;
+      }
     }
 
     // Create temp directory if it doesn't exist

@@ -111,6 +111,7 @@ describe('MessageBuilder', () => {
       const config = JSON.parse(writtenContent);
 
       expect(config.mcpServers['Server 1']).toEqual({
+        type: 'stdio',
         command: 'command1',
         args: ['--arg1', 'value1'],
         env: { NODE_ENV: 'production' },
@@ -133,11 +134,9 @@ describe('MessageBuilder', () => {
       const config = JSON.parse(writtenContent);
 
       expect(config.mcpServers['API Server']).toEqual({
-        transport: {
-          type: 'http',
-          url: 'http://localhost:8080',
-          headers: { 'Authorization': 'Bearer token' },
-        },
+        type: 'http',
+        url: 'http://localhost:8080',
+        headers: { 'Authorization': 'Bearer token' },
       });
     });
 
@@ -166,7 +165,7 @@ describe('MessageBuilder', () => {
 
       expect(Object.keys(config.mcpServers)).toHaveLength(2);
       expect(config.mcpServers['Stdio Server']).toHaveProperty('command');
-      expect(config.mcpServers['HTTP Server']).toHaveProperty('transport');
+      expect(config.mcpServers['HTTP Server']).toHaveProperty('url');
     });
 
     it('should include servers with enabled: false', () => {
