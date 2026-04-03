@@ -4,6 +4,7 @@ module.exports = {
   testEnvironment: 'node',
   roots: ['<rootDir>/test'],
   testMatch: ['**/*.test.ts'],
+  setupFilesAfterEnv: ['<rootDir>/test/setup.ts'],
   // Force-exit after all tests complete to avoid waiting on background async
   // operations (e.g. child processes from claudeCliService, ralph-loop callbacks).
   forceExit: true,

@@ -337,6 +337,7 @@ describe('ClaudeBinary', () => {
 
       const writtenConfig = JSON.parse(mockFs.writeFileSync.mock.calls[0]?.[1] as string || '{}');
       expect(writtenConfig.mcpServers.filesystem).toEqual({
+        type: 'stdio',
         command: 'npx @modelcontextprotocol/server-filesystem',
         args: ['--root', '/test/path'],
         env: { NODE_ENV: 'production' }
@@ -371,11 +372,9 @@ describe('ClaudeBinary', () => {
 
       const writtenConfig = JSON.parse(mockFs.writeFileSync.mock.calls[0]?.[1] as string || '{}');
       expect(writtenConfig.mcpServers['api-server']).toEqual({
-        transport: {
-          type: 'http',
-          url: 'localhost:8080',
-          headers: { Authorization: 'Bearer token123' }
-        }
+        type: 'http',
+        url: 'localhost:8080',
+        headers: { Authorization: 'Bearer token123' }
       });
     });
 
@@ -408,6 +407,7 @@ describe('ClaudeBinary', () => {
 
       const writtenConfig = JSON.parse(mockFs.writeFileSync.mock.calls[0]?.[1] as string || '{}');
       expect(writtenConfig.mcpServers['disabled-server']).toEqual({
+        type: 'stdio',
         command: 'some-command'
       });
     });
@@ -448,7 +448,7 @@ describe('ClaudeBinary', () => {
       expect(writtenConfig.mcpServers).toHaveProperty('server1');
       expect(writtenConfig.mcpServers).toHaveProperty('server2');
       expect(writtenConfig.mcpServers.server1.command).toBe('command1');
-      expect(writtenConfig.mcpServers.server2.transport.url).toBe('localhost:8081');
+      expect(writtenConfig.mcpServers.server2.url).toBe('localhost:8081');
     });
 
     it('should clean up MCP config file on stop', async () => {
