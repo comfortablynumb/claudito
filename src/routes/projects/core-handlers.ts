@@ -39,7 +39,7 @@ export function handleDiscoverProjects(deps: ProjectRouterDependencies) {
 async function registerDiscoveredProjects(
   projectRepository: ProjectRouterDependencies['projectRepository'],
   discovered: string[]
-) {
+): Promise<{ discovered: number; registered: number; alreadyRegistered: number; failed: number; projects: Array<{ id: string; name: string; path: string }> }> {
   const registered: Array<{ id: string; name: string; path: string }> = [];
   const alreadyRegistered: string[] = [];
   const failed: string[] = [];
@@ -120,7 +120,7 @@ function extractTrackedProcesses(processTracker: unknown): Array<{ pid: number; 
   return [];
 }
 
-async function buildRalphLoopDebugInfo(ralphLoopService: { listByProject: (id: string) => Promise<Array<{ taskId: string; status: string; currentIteration: number }>> }, id: string) {
+async function buildRalphLoopDebugInfo(ralphLoopService: { listByProject: (id: string) => Promise<Array<{ taskId: string; status: string; currentIteration: number }>> }, id: string): Promise<{ count: number; activeLoops: Array<{ taskId: string; status: string; currentTurn: number }> }> {
   const ralphLoops = await ralphLoopService.listByProject(id);
   return {
     count: ralphLoops.length,
