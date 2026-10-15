@@ -78,6 +78,42 @@ describe('ImageAttachmentModule', () => {
   });
 
   describe('handlePaste', () => {
+    it('should attach an image pasted as a data: URL in text/plain', () => {
+      const dataUrl = 'data:image/png;base64,' + 'A'.repeat(64);
+      const mockEvent = {
+        originalEvent: {
+          clipboardData: {
+            items: [],
+            getData: jest.fn().mockReturnValue(dataUrl)
+          }
+        },
+        preventDefault: jest.fn()
+      };
+
+      ImageAttachmentModule.handlePaste(mockEvent);
+
+      expect(mockEvent.preventDefault).toHaveBeenCalled();
+      expect(mockState.pendingImages).toHaveLength(1);
+      expect(mockState.pendingImages[0].mimeType).toBe('image/jpeg');
+    });
+
+    it('should leave ordinary pasted text alone', () => {
+      const mockEvent = {
+        originalEvent: {
+          clipboardData: {
+            items: [],
+            getData: jest.fn().mockReturnValue('just some text')
+          }
+        },
+        preventDefault: jest.fn()
+      };
+
+      ImageAttachmentModule.handlePaste(mockEvent);
+
+      expect(mockEvent.preventDefault).not.toHaveBeenCalled();
+      expect(mockState.pendingImages).toHaveLength(0);
+    });
+
     it('should process image from clipboard', () => {
       const mockFile = new File([''], 'test.png', { type: 'image/png' });
       const mockEvent = {

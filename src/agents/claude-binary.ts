@@ -48,6 +48,13 @@ export interface ClaudeBinaryConfig {
   chromeEnabled?: boolean;
 }
 
+type ContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image'; source: { type: string; media_type: string; data: string } }
+  | { type: 'document'; source: { type: string; media_type: string; data: string } };
+
+const CONTENT_BLOCK_TYPES = ['text', 'image', 'document'];
+
 export interface ClaudeBinaryStartOptions {
   initialMessage?: string;
   images?: Array<{ data: string; mediaType: string }>;
@@ -557,13 +564,49 @@ export class ClaudeBinary implements Agent {
     this.sendInputInternal(input);
   }
 
+  /**
+   * Multimodal input reaches this class as the JSON string of an Anthropic
+   * content block array (see AgentManager.buildMultimodalContent). The CLI
+   * only recognises attachments when `content` is a real array, so the string
+   * has to be parsed back before it is written to stdin. Plain text - and text
+   * that merely starts with '[' - is returned as null and sent unchanged.
+   */
+  private static parseContentBlocks(input: string): ContentBlock[] | null {
+    if (input.charAt(0) !== '[') {
+      return null;
+    }
+
+    try {
+      const parsed: unknown = JSON.parse(input);
+
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        return null;
+      }
+
+      const isContentBlock = (block: unknown): block is ContentBlock => {
+        if (typeof block !== 'object' || block === null) {
+          return false;
+        }
+
+        const { type } = block as { type?: unknown };
+
+        return typeof type === 'string' && CONTENT_BLOCK_TYPES.includes(type);
+      };
+
+      return parsed.every(isContentBlock) ? parsed : null;
+    } catch {
+      // Not JSON after all - treat it as ordinary text.
+      return null;
+    }
+  }
+
   private sendInputInternal(input: string): void {
     // Both modes use stream-json format for stdin
     const jsonMessage = JSON.stringify({
       type: 'user',
       message: {
         role: 'user',
-        content: input,
+        content: ClaudeBinary.parseContentBlocks(input) ?? input,
       },
     });
     const messageToSend = jsonMessage + '\n';

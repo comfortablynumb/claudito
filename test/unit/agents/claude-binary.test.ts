@@ -500,6 +500,39 @@ describe('ClaudeBinary', () => {
       expect(parsed.message.content).toBe('test instructions');
     });
 
+    it('should write multimodal content blocks to stdin as an array', () => {
+      const blocks = [
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } },
+        { type: 'text', text: 'what colour is this?' },
+      ];
+
+      agent.start(JSON.stringify(blocks));
+
+      const writtenData = mockProcess.stdin.write.mock.calls[0][0];
+      const parsed = JSON.parse(writtenData.replace('\n', ''));
+      // A JSON *string* here would be forwarded as plain text and the model
+      // would never see the image.
+      expect(parsed.message.content).toEqual(blocks);
+    });
+
+    it('should not treat plain text starting with a bracket as content blocks', () => {
+      agent.start('[WARN] build failed, see log');
+
+      const writtenData = mockProcess.stdin.write.mock.calls[0][0];
+      const parsed = JSON.parse(writtenData.replace('\n', ''));
+      expect(parsed.message.content).toBe('[WARN] build failed, see log');
+    });
+
+    it('should not treat a JSON array without block types as content blocks', () => {
+      const payload = JSON.stringify([{ foo: 1 }, { bar: 2 }]);
+
+      agent.start(payload);
+
+      const writtenData = mockProcess.stdin.write.mock.calls[0][0];
+      const parsed = JSON.parse(writtenData.replace('\n', ''));
+      expect(parsed.message.content).toBe(payload);
+    });
+
     it('should close stdin in autonomous mode after writing', () => {
       agent = new ClaudeBinary({
         ...defaultConfig,
@@ -619,9 +652,10 @@ describe('ClaudeBinary', () => {
       expect(mockProcess.stdin.write).toHaveBeenCalled();
       const writtenData = mockProcess.stdin.write.mock.calls[0][0];
       const parsed = JSON.parse(writtenData.replace('\n', ''));
-      // Claude agent always sends input as a string, multimodal handling is done at agent-manager level
-      expect(typeof parsed.message.content).toBe('string');
-      expect(parsed.message.content).toBe(multimodalContent);
+      // The blocks must reach the CLI as an array. Sent as a string they are
+      // forwarded as plain text and the model never sees the image.
+      expect(Array.isArray(parsed.message.content)).toBe(true);
+      expect(parsed.message.content).toEqual(JSON.parse(multimodalContent));
     });
   });
 

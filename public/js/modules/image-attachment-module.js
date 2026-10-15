@@ -31,9 +31,24 @@
    * @param {Event} e - Paste event
    */
   function handlePaste(e) {
-    var clipboardData = e.originalEvent.clipboardData || e.clipboardData;
+    var clipboardData = (e.originalEvent && e.originalEvent.clipboardData) || e.clipboardData;
 
-    if (!clipboardData || !clipboardData.items) return;
+    if (!clipboardData) return;
+
+    // Some screenshot tools and browsers put the image on the clipboard as a
+    // data: URL in text/plain rather than as a file. Without this branch the
+    // base64 would be pasted into the textarea as plain text.
+    if (clipboardData.getData) {
+      var pastedText = (clipboardData.getData('text/plain') || '').trim();
+
+      if (/^data:image\/[a-z0-9+.-]+;base64,/i.test(pastedText)) {
+        e.preventDefault();
+        attachDataUrl(pastedText);
+        return;
+      }
+    }
+
+    if (!clipboardData.items) return;
 
     for (var i = 0; i < clipboardData.items.length; i++) {
       var item = clipboardData.items[i];
@@ -102,6 +117,31 @@
     };
 
     img.src = dataUrl;
+  }
+
+  /**
+   * Attach an image that arrived as a data: URL rather than as a file.
+   * @param {string} dataUrl - data:image/...;base64,... URL
+   */
+  function attachDataUrl(dataUrl) {
+    var approxSize = Math.round((dataUrl.split(',')[1] || '').length * 0.75);
+
+    if (approxSize > MAX_FILE_SIZE) {
+      showToast('Image too large (max 10MB)', 'error');
+      return;
+    }
+
+    compressImage(dataUrl, function(compressed) {
+      state.pendingImages.push({
+        id: 'img-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9),
+        dataUrl: compressed.dataUrl,
+        mimeType: compressed.mimeType,
+        size: compressed.size,
+        originalSize: approxSize
+      });
+
+      renderPreviews();
+    });
   }
 
   /**
