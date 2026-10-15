@@ -4112,11 +4112,27 @@
   }
 
   function handleAddProject($form) {
+    var projectName = ($form.find('[name="name"]').val() || '').trim();
+    var selectedPath = ($form.find('[name="path"]').val() || '').trim();
+    var createNew = $form.find('[name="createNew"]').is(':checked');
     var formData = {
-      name: $form.find('[name="name"]').val(),
-      path: $form.find('[name="path"]').val(),
-      createNew: $form.find('[name="createNew"]').is(':checked')
+      name: projectName,
+      path: selectedPath,
+      createNew: createNew
     };
+
+    // The path field is readonly and filled from the folder browser, which can
+    // only select folders that already exist. With "create new project folder"
+    // checked the selected folder is therefore the parent, and the folder to
+    // create has to be derived from the project name - otherwise the server
+    // sees an existing path and rejects it with "Folder already exists".
+    if (createNew && projectName && selectedPath) {
+      var separator = selectedPath.indexOf('\\') !== -1 ? '\\' : '/';
+      var folderName = projectName.replace(/[\\/]+/g, '-');
+
+      formData.path = selectedPath +
+        (selectedPath.endsWith(separator) ? '' : separator) + folderName;
+    }
 
     api.addProject(formData)
       .done(function(project) {

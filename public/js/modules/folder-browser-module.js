@@ -64,6 +64,29 @@
   }
 
   /**
+   * Separator used by a given path. Claudito runs on Windows as well as on
+   * Linux and macOS, so the separator is derived from the path instead of
+   * being hardcoded.
+   * @param {string} pathStr - Path string
+   * @returns {string} '\\' for Windows paths, '/' otherwise
+   */
+  function pathSeparator(pathStr) {
+    return pathStr.indexOf('\\') !== -1 ? '\\' : '/';
+  }
+
+  /**
+   * Join a folder path and a child name using the path's own separator.
+   * @param {string} parentPath - Folder to join into
+   * @param {string} childName - Name of the child entry
+   * @returns {string} Joined path
+   */
+  function joinPath(parentPath, childName) {
+    var separator = pathSeparator(parentPath);
+
+    return parentPath + (parentPath.endsWith(separator) ? '' : separator) + childName;
+  }
+
+  /**
    * Extract folder name from path
    * @param {string} folderPath - Full folder path
    * @returns {string} Folder name
@@ -105,10 +128,14 @@
 
     if (currentPath) {
       var parts = splitPath(currentPath);
+      var separator = pathSeparator(currentPath);
+      // splitPath() drops the leading separator, so an absolute POSIX path has
+      // to start accumulating from '' to keep its root slash.
+      var startsAtRoot = separator === '/' && currentPath.charAt(0) === '/';
       var accumulated = '';
 
       parts.forEach(function(part, index) {
-        accumulated += (index === 0) ? part : '\\' + part;
+        accumulated = (index === 0 && !startsAtRoot) ? part : accumulated + separator + part;
         $breadcrumb.append('<span class="folder-breadcrumb-separator">/</span>');
         $breadcrumb.append(
           '<span class="folder-breadcrumb-item" data-path="' +
@@ -255,7 +282,7 @@
     }
 
     folderName = folderName.trim();
-    var newPath = currentPath + '\\' + folderName;
+    var newPath = joinPath(currentPath, folderName);
 
     api.createFolder(newPath)
       .done(function() {
@@ -308,6 +335,8 @@
     getFolderIcon: getFolderIcon,
     getFileIcon: getFileIcon,
     splitPath: splitPath,
+    pathSeparator: pathSeparator,
+    joinPath: joinPath,
     extractFolderName: extractFolderName,
     updateSelectedPathDisplay: updateSelectedPathDisplay,
     renderBreadcrumb: renderBreadcrumb,
@@ -318,6 +347,7 @@
     loadDrives: loadDrives,
     open: open,
     confirmSelection: confirmSelection,
+    createNewFolder: createNewFolder,
     setupHandlers: setupHandlers
   };
 }));

@@ -47,6 +47,10 @@ describe('FolderBrowserModule', () => {
           return this;
         }),
         fail: jest.fn().mockReturnThis()
+      }),
+      createFolder: jest.fn().mockReturnValue({
+        done: jest.fn().mockReturnThis(),
+        fail: jest.fn().mockReturnThis()
       })
     };
 
@@ -128,6 +132,64 @@ describe('FolderBrowserModule', () => {
       const name = FolderBrowserModule.extractFolderName('C:');
 
       expect(name).toBe('C:');
+    });
+  });
+
+  describe('pathSeparator', () => {
+    it('should use a backslash for Windows paths', () => {
+      expect(FolderBrowserModule.pathSeparator('C:\\Users\\test')).toBe('\\');
+    });
+
+    it('should use a forward slash for POSIX paths', () => {
+      expect(FolderBrowserModule.pathSeparator('/media/claude_projects')).toBe('/');
+    });
+  });
+
+  describe('joinPath', () => {
+    it('should join POSIX paths with a forward slash', () => {
+      expect(FolderBrowserModule.joinPath('/media/claude_projects', 'Tests'))
+        .toBe('/media/claude_projects/Tests');
+    });
+
+    it('should join Windows paths with a backslash', () => {
+      expect(FolderBrowserModule.joinPath('C:\\projects', 'Tests'))
+        .toBe('C:\\projects\\Tests');
+    });
+
+    it('should not double an existing trailing separator', () => {
+      expect(FolderBrowserModule.joinPath('/media/', 'Tests')).toBe('/media/Tests');
+      expect(FolderBrowserModule.joinPath('C:\\', 'Tests')).toBe('C:\\Tests');
+    });
+  });
+
+  describe('createNewFolder', () => {
+    it('should create the folder inside the current POSIX path', () => {
+      mockState.folderBrowser.currentPath = '/media/claude_projects';
+      global.prompt = jest.fn().mockReturnValue('Tests');
+
+      FolderBrowserModule.createNewFolder();
+
+      // A hardcoded backslash would ask the server to create
+      // '/media/claude_projects\\Tests', which is a folder inside /media.
+      expect(mockApi.createFolder).toHaveBeenCalledWith('/media/claude_projects/Tests');
+    });
+
+    it('should create the folder inside the current Windows path', () => {
+      mockState.folderBrowser.currentPath = 'C:\\projects';
+      global.prompt = jest.fn().mockReturnValue('Tests');
+
+      FolderBrowserModule.createNewFolder();
+
+      expect(mockApi.createFolder).toHaveBeenCalledWith('C:\\projects\\Tests');
+    });
+
+    it('should do nothing when the prompt is cancelled', () => {
+      mockState.folderBrowser.currentPath = '/media/claude_projects';
+      global.prompt = jest.fn().mockReturnValue(null);
+
+      FolderBrowserModule.createNewFolder();
+
+      expect(mockApi.createFolder).not.toHaveBeenCalled();
     });
   });
 
@@ -216,6 +278,13 @@ describe('FolderBrowserModule', () => {
 
       // Should have multiple appends: Drives + separator + path parts
       expect(mockBreadcrumb.append).toHaveBeenCalledTimes(7);
+    });
+
+    it('should keep the root slash when accumulating POSIX segments', () => {
+      FolderBrowserModule.renderBreadcrumb('/media/claude_projects');
+
+      expect(mockEscapeHtml).toHaveBeenCalledWith('/media');
+      expect(mockEscapeHtml).toHaveBeenCalledWith('/media/claude_projects');
     });
   });
 
